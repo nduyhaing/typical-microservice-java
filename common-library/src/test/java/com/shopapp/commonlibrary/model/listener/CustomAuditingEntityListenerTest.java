@@ -59,10 +59,10 @@ class CustomAuditingEntityListenerTest {
     }
 
     @Test
-    void update_withPresetLastModifiedBy_keepsIt() {
-        entity.setLastModifiedBy("editor");
+    void update_afterCreation_recordsCurrentModifier() {
+        entity.setCreatedBy("creator");
+        entity.setLastModifiedBy("creator");
         listener.touchForUpdate(entity);
-        assertThat(entity.getLastModifiedBy()).isEqualTo("editor");
-        verify(handler, never()).markModified(any());
+        verify(handler).markModified(entity);
     }
 }

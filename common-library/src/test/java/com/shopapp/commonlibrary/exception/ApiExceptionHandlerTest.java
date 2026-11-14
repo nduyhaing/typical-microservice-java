@@ -79,6 +79,22 @@ class ApiExceptionHandlerTest {
             // only reached when the parameter is present
         }
 
+        @GetMapping("/products/{id}")
+        void product(@org.springframework.web.bind.annotation.PathVariable Long id) {
+            // only reached when id is numeric
+        }
+
+        @GetMapping("/data-integrity")
+        void dataIntegrity() {
+            throw new org.springframework.dao.DataIntegrityViolationException(
+                "could not execute statement [ERROR: duplicate key value violates unique constraint \"uk_slug\"]");
+        }
+
+        @GetMapping("/security-denied")
+        void securityDenied() {
+            throw new org.springframework.security.access.AccessDeniedException("Access Denied");
+        }
+
         @PostMapping("/validated")
         void validated(@Valid @RequestBody NameRequest request) {
             // only reached when the body is valid
@@ -178,5 +194,50 @@ class ApiExceptionHandlerTest {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.detail").value("Request information is not valid"))
             .andExpect(jsonPath("$.fieldErrors[0]").value("name must not be blank"));
+    }
+
+    @Test
+    void unknownPath_returns404NotServerError() throws Exception {
+        mockMvc.perform(get("/no-such-path"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.statusCode").value("404 NOT_FOUND"));
+    }
+
+    @Test
+    void wrongMethod_returns405() throws Exception {
+        mockMvc.perform(post("/not-found"))
+            .andExpect(status().isMethodNotAllowed())
+            .andExpect(jsonPath("$.statusCode").value("405 METHOD_NOT_ALLOWED"));
+    }
+
+    @Test
+    void malformedJson_returns400WithoutParserInternals() throws Exception {
+        String body = mockMvc.perform(post("/validated").contentType(MediaType.APPLICATION_JSON).content("{oops"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.statusCode").value("400 BAD_REQUEST"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(body).doesNotContain("JSON parse error");
+    }
+
+    @Test
+    void typeMismatch_returns400() throws Exception {
+        mockMvc.perform(get("/products/abc"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void springSecurityAccessDenied_returns403() throws Exception {
+        mockMvc.perform(get("/security-denied"))
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.statusCode").value("403 FORBIDDEN"));
+    }
+
+    @Test
+    void dataIntegrityViolation_returns400WithoutSql() throws Exception {
+        String body = mockMvc.perform(get("/data-integrity"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Request conflicts with existing data"))
+            .andReturn().getResponse().getContentAsString();
+        assertThat(body).doesNotContain("uk_slug");
     }
 }
