@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { useState } from 'react';
 import Button from 'react-bootstrap/Button';
 import Spinner from 'react-bootstrap/Spinner';
@@ -11,10 +12,13 @@ import { formatPrice } from '../common/utils/format';
 import { LOGIN_URL } from '../modules/auth/services/AuthenticationService';
 import { CartLine } from '../modules/cart/models/CartItem';
 import { getCartLines, removeItem, updateQuantity } from '../modules/cart/services/CartService';
+import { createCheckout } from '../modules/order/services/OrderService';
 
 /** The logged-in customer's cart (slice 2b). Checkout comes in 2c. */
 export default function CartPage() {
+  const router = useRouter();
   const [version, setVersion] = useState(0);
+  const [checkingOut, setCheckingOut] = useState(false);
   const [actionError, setActionError] = useState(false);
   const { data: lines, error, loading } = useFetch(getCartLines, [version]);
   const notLoggedIn = error instanceof ApiError && (error.status === 401 || error.status === 403);
@@ -32,6 +36,22 @@ export default function CartPage() {
   const decrease = (line: CartLine) =>
     change(() => (line.quantity <= 1 ? removeItem(line.productId) : updateQuantity(line.productId, line.quantity - 1)));
   const increase = (line: CartLine) => change(() => updateQuantity(line.productId, line.quantity + 1));
+  const canCheckout = !!lines && lines.length > 0 && lines.every((line) => line.available) && !checkingOut;
+
+  const checkout = async () => {
+    if (!lines) {
+      return;
+    }
+    setCheckingOut(true);
+    try {
+      const created = await createCheckout(lines.map((line) => ({ productId: line.productId, quantity: line.quantity })));
+      await router.push(`/checkout/${created.id}`);
+    } catch {
+      setActionError(true);
+      setCheckingOut(false);
+    }
+  };
+
   const total = (lines ?? [])
     .filter((line) => line.available)
     .reduce((sum, line) => sum + line.price * line.quantity, 0);
@@ -117,6 +137,16 @@ export default function CartPage() {
             </tr>
           </tfoot>
         </Table>
+      )}
+      {lines && lines.length > 0 && (
+        <div className="text-end">
+          {!lines.every((line) => line.available) && (
+            <p className="small text-muted">Remove the items that are no longer available to check out.</p>
+          )}
+          <Button onClick={checkout} disabled={!canCheckout}>
+            Checkout
+          </Button>
+        </div>
       )}
     </Layout>
   );

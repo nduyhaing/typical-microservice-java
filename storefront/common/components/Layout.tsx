@@ -39,6 +39,9 @@ function AccountMenu() {
     <Nav className="align-items-md-center gap-md-2">
       <Navbar.Text className="text-light">{authentication.authenticatedUser?.username}</Navbar.Text>
       <CartLink />
+      <Nav.Link as={Link} href="/my-orders">
+        My orders
+      </Nav.Link>
       <Nav.Link as={Link} href="/profile">
         Profile
       </Nav.Link>

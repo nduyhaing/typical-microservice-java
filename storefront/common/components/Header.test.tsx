@@ -32,6 +32,7 @@ describe('Header', () => {
 
     expect(await screen.findByText('customer')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Profile' })).toHaveAttribute('href', '/profile');
+    expect(screen.getByRole('link', { name: 'My orders' })).toHaveAttribute('href', '/my-orders');
     expect(await screen.findByRole('link', { name: 'Cart (3)' })).toHaveAttribute('href', '/cart');
     const logout = screen.getByRole('button', { name: 'Log out' });
     expect(logout.closest('form')).toHaveAttribute('action', '/logout');

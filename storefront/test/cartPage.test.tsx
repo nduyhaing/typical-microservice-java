@@ -11,6 +11,8 @@ vi.mock('../modules/auth/services/AuthenticationService', async (original) => ({
   getAuthentication: vi.fn(),
 }));
 vi.mock('../modules/cart/services/CartService');
+vi.mock('../modules/order/services/OrderService');
+vi.mock('next/router', () => ({ useRouter: () => ({ push: vi.fn(), query: {}, isReady: true }) }));
 
 const lines = [
   { productId: 1, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2, available: true },
