@@ -15,7 +15,7 @@
     <version>${revision}</version>
     <packaging>pom</packaging>
     <name>shop-app</name>
-    <description>shop_app - a rebuild of YAS (Yet Another Shop) microservices e-commerce</description>
+    <description>shop_app - microservices e-commerce</description>
 
     <modules>
         <module>common-library</module>

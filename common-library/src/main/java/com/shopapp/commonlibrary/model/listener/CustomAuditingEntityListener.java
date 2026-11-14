@@ -31,8 +31,8 @@ public class CustomAuditingEntityListener extends AuditingEntityListener {
         }
     }
 
-    // YAS skipped auditing whenever lastModifiedBy was set, which after the first persist is always:
-    // updates then kept the creator as modifier. Always delegating records who actually made the change.
+    // Always delegate: skipping when lastModifiedBy is set would keep the creator as modifier forever,
+    // because it is never null after the first persist.
     @Override
     @PreUpdate
     public void touchForUpdate(Object target) {

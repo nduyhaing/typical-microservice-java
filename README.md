@@ -1,8 +1,6 @@
 # shop_app
 
-A microservices e-commerce system, rebuilt from scratch after
-[YAS (Yet Another Shop)](https://github.com/nashtech-garage/yas) — same architecture and features,
-on Java 27 and Spring Boot 4. See `NOTICE` for the YAS credit and reference commit.
+A microservices e-commerce system on Java 27 and Spring Boot 4. See `NOTICE` for third-party licenses.
 
 ## Roadmap
 
@@ -80,7 +78,7 @@ Keycloak clients: `storefront-bff`, `backoffice-bff`, `customer-management` (con
 - **Lombok** 1.18.48: kept. It works on JDK 27 but prints a `sun.misc.Unsafe` deprecation warning during
   compilation; harmless for now.
 - **MapStruct** 1.6.3: kept. **JaCoCo** 0.8.16: kept (report in `common-library/target/site/jacoco`).
-- Checkstyle (config from YAS) fails the build on any warning.
-- Kafka runs in KRaft mode (no ZooKeeper), unlike YAS which still uses ZooKeeper.
+- Checkstyle fails the build on any warning.
+- Kafka runs in KRaft mode (no ZooKeeper).
 - Images: postgres 16.16, pgAdmin 9.19.0, Keycloak 26.8.2, apache/kafka 4.4.0, kafbat/kafka-ui v1.5.0,
   nginx 1.30.6.
