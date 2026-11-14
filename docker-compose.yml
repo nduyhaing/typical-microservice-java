@@ -300,6 +300,22 @@ services:
     networks:
       - shopapp-network
 
+  # the Next.js back office; only reachable through backoffice-bff (admin login), which routes /** here
+  backoffice:
+    build: ./backoffice
+    image: shopapp/backoffice:dev
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    depends_on:
+      backoffice-bff:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   nginx:
     image: nginx:1.30.6
     environment:
