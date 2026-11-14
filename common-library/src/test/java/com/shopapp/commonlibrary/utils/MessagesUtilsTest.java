@@ -22,4 +22,14 @@ class MessagesUtilsTest {
         assertThat(MessagesUtils.getMessage("RESOURCE_NOT_FOUND", "Product"))
             .isEqualTo("Resource Product with id {} not found");
     }
+
+    @Test
+    void serviceBundleKeyResolves() {
+        assertThat(MessagesUtils.getMessage("SERVICE_ONLY_KEY", "hi")).isEqualTo("Service says hi");
+    }
+
+    @Test
+    void libraryKeyStillResolvesWhenServiceShipsItsOwnBundle() {
+        assertThat(MessagesUtils.getMessage("SIGN_IN_REQUIRED")).isEqualTo("Authentication required");
+    }
 }

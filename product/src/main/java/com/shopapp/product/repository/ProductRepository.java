@@ -15,6 +15,9 @@ import org.springframework.stereotype.Repository;
 public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findAllByBrandAndIsPublishedTrueOrderByIdAsc(Brand brand);
 
+    /** Storefront brand listing: also hides variations (YAS shows them; decisions.md 2a-8). */
+    List<Product> findAllByBrandAndIsPublishedTrueAndIsVisibleIndividuallyTrueOrderByIdAsc(Brand brand);
+
     Optional<Product> findBySlugAndIsPublishedTrue(String slug);
 
     Optional<Product> findByGtinAndIsPublishedTrue(String gtin);

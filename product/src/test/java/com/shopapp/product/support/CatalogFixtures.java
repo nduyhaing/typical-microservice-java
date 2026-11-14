@@ -4,9 +4,11 @@ import com.shopapp.product.model.Brand;
 import com.shopapp.product.model.Category;
 import com.shopapp.product.model.Product;
 import com.shopapp.product.model.ProductCategory;
+import com.shopapp.product.model.ProductRelated;
 import com.shopapp.product.repository.BrandRepository;
 import com.shopapp.product.repository.CategoryRepository;
 import com.shopapp.product.repository.ProductCategoryRepository;
+import com.shopapp.product.repository.ProductRelatedRepository;
 import com.shopapp.product.repository.ProductRepository;
 import org.springframework.boot.test.context.TestComponent;
 
@@ -20,13 +22,16 @@ public class CatalogFixtures {
     private final CategoryRepository categoryRepository;
     private final ProductRepository productRepository;
     private final ProductCategoryRepository productCategoryRepository;
+    private final ProductRelatedRepository productRelatedRepository;
 
     public CatalogFixtures(BrandRepository brandRepository, CategoryRepository categoryRepository,
-                           ProductRepository productRepository, ProductCategoryRepository productCategoryRepository) {
+                           ProductRepository productRepository, ProductCategoryRepository productCategoryRepository,
+                           ProductRelatedRepository productRelatedRepository) {
         this.brandRepository = brandRepository;
         this.categoryRepository = categoryRepository;
         this.productRepository = productRepository;
         this.productCategoryRepository = productCategoryRepository;
+        this.productRelatedRepository = productRelatedRepository;
     }
 
     public Brand brand(String name, String slug) {
@@ -64,5 +69,25 @@ public class CatalogFixtures {
         productCategory.setProduct(product);
         productCategory.setCategory(category);
         productCategoryRepository.save(productCategory);
+    }
+
+    public Product ofBrand(Product product, Brand brand) {
+        product.setBrand(brand);
+        return productRepository.save(product);
+    }
+
+    public void related(Product product, Product relatedProduct) {
+        ProductRelated productRelated = new ProductRelated();
+        productRelated.setProduct(product);
+        productRelated.setRelatedProduct(relatedProduct);
+        productRelatedRepository.save(productRelated);
+    }
+
+    /** A variation: published, hidden from lists, child of the given parent. */
+    public Product variation(Product parent, String name, String slug, double price) {
+        Product variation = product(name, slug, price);
+        variation.setVisibleIndividually(false);
+        variation.setParent(parent);
+        return productRepository.save(variation);
     }
 }

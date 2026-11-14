@@ -66,3 +66,7 @@ a git checkout; expected 4xx logged at ERROR; a service's own `messages.properti
 | 2a-5 | Home and list pages fetch in the browser; product detail is server-rendered with a real 404 (YAS parity) | Claude | YAS does exactly this | — |
 | 2a-6 | Category and brand filters stay separate (YAS parity) | Claude | YAS endpoints | — |
 | 2a-7 | Java services in Docker on `eclipse-temurin:27-jre`; storefront on `node:24-alpine`; none published on host ports | Claude | YAS style; loopback-only rule | — |
+| 2a-8 | Storefront category and brand product lists hide unpublished products and variations (YAS shows unpublished products in category lists and variations in both) | Claude | Shoppers must only see sellable, individually listed products | — |
+| 2a-9 | `common-library` messages renamed to `messages/common-messages.properties`; lookups try the service's `messages/messages.properties` first, then the library's (closes slice-1 deferred minor) | Claude | A service bundle used to hide the library's codes | — |
+| 2a-10 | Storefront paging parameters validated (`pageNo >= 0`, `pageSize >= 1`) → 400 instead of 500 | Claude | Bad input must not look like a server failure | — |
+| 2a-11 | Media lookups in 2a: empty URL when the media id is null, the media URL is not configured, or the media service fails; no retry/circuit breaker until slice 3 | Claude | Media service doesn't exist yet | — |
