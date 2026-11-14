@@ -83,3 +83,13 @@ Deferred from the 2a review (minor): `productName` filter treats `%`/`_` as wild
 timeouts when media is wired in (slice 3); storefront container runs as root; free-text `specification` not shown on
 the product page; a failing variations/option-values call fails the whole product page instead of hiding options.
 
+### 2b — Log in + cart
+
+| # | Decision | By | Why | Cost if wrong |
+|---|---|---|---|---|
+| 2b-1 | No guest cart: the cart needs a logged-in user (YAS cart is keyed by customer id) | Claude | Agreed flow doesn't need guests | Add guest carts later |
+| 2b-2 | Customer service: profile only (addresses come with location in slice 3) | Claude | Scope | — |
+| 2b-3 | Cart mapper hand-written as in YAS; anonymous cart calls → 403 ErrorVm (YAS); product service down → 500 without saving, cart→product calls time out after 2 s connect / 5 s read (retry/circuit breaker in slice 3) | Claude | YAS parity; no hanging requests | — |
+| 2b-4 | Realm gets the `kc-admin-api` client scope (admin REST API audience) for `customer-management`: Keycloak 26.x rejects admin-API tokens without that audience ("Expected audience not available"), and YAS's older realm export lacks the scope. Added to `identity/realm-export.json` for fresh installs; `identity/scripts/apply-kc-admin-api-scope.sh` applies it to existing volumes | Claude | Customer profile got 401 from Keycloak's admin API | — |
+| 2b-5 | Client secrets for `customer-management` and `storefront-bff` passed to containers from `.env` (local-dev values copied from the realm file) | Claude | One place for dev secrets | Dev-only values |
+
