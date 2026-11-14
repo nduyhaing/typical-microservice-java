@@ -141,3 +141,21 @@ server {
         proxy_set_header X-Forwarded-Host $http_host;
     }
 }
+
+server {
+    listen ${NGINX_HTTP_PORT};
+    server_name backoffice.${DOMAIN};
+
+    location / {
+        set $upstream_backoffice_bff backoffice-bff:8088;
+        proxy_pass http://$upstream_backoffice_bff;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+        proxy_set_header X-Forwarded-Host $http_host;
+    }
+}

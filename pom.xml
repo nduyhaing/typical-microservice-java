@@ -21,6 +21,7 @@
         <module>common-library</module>
         <module>product</module>
         <module>storefront-bff</module>
+        <module>backoffice-bff</module>
         <module>cart</module>
         <module>customer</module>
         <module>order</module>
