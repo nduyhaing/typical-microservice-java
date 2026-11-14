@@ -1,10 +1,14 @@
 package com.shopapp.product.controller;
 
+import com.shopapp.product.service.ProductDetailService;
 import com.shopapp.product.service.ProductService;
+import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
+import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
 import com.shopapp.product.viewmodel.product.ProductsGetVm;
+import com.shopapp.product.viewmodel.productoption.ProductOptionCombinationGetVm;
 import jakarta.validation.constraints.Min;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class ProductController {
 
     private final ProductService productService;
+    private final ProductDetailService productDetailService;
 
     @GetMapping("/storefront/products/featured")
     public ResponseEntity<ProductFeatureGetVm> getFeaturedProducts(
@@ -54,6 +59,22 @@ public class ProductController {
     @GetMapping("/storefront/brand/{brandSlug}/products")
     public ResponseEntity<List<ProductThumbnailVm>> getProductsByBrand(@PathVariable String brandSlug) {
         return ResponseEntity.ok(productService.getProductsByBrand(brandSlug));
+    }
+
+    @GetMapping("/storefront/product/{slug}")
+    public ResponseEntity<ProductDetailGetVm> getProductDetail(@PathVariable("slug") String slug) {
+        return ResponseEntity.ok(productDetailService.getProductDetail(slug));
+    }
+
+    @GetMapping("/storefront/product-variations/{id}")
+    public ResponseEntity<List<ProductVariationGetVm>> getProductVariationsByParentId(@PathVariable Long id) {
+        return ResponseEntity.ok(productDetailService.getProductVariationsByParentId(id));
+    }
+
+    @GetMapping("/storefront/product-option-combinations/{productId}/values")
+    public ResponseEntity<List<ProductOptionCombinationGetVm>> listProductOptionValueOfProduct(
+        @PathVariable("productId") Long productId) {
+        return ResponseEntity.ok(productDetailService.getOptionValues(productId));
     }
 
     @GetMapping("/storefront/products/related-products/{id}")
