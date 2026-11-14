@@ -18,6 +18,7 @@ during implementation (the owner asked for automatic implementation with decisio
 | P8 | YAS mentions removed from README, POM and code; `NOTICE` keeps only the MIT license text legally required for derived files; design docs keep the YAS reference | User + Claude | Owner's request; MIT requires the notice | — |
 | P9 | Implementation runs automatically; decisions recorded in this file instead of asked | User | Owner's request | Owner reviews decisions after the fact |
 | P10 | Commit directly on `master` (no feature branches) | User | Owner's request | No branch to review or discard as a unit |
+| P11 | Push `master` to GitHub after each commit, automatically | User | Owner's request | Unreviewed work becomes public immediately |
 
 ## Slice 1 — Foundation (merged)
 
