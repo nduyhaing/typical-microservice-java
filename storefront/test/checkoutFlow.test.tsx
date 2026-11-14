@@ -125,6 +125,43 @@ describe('Checkout page', () => {
     expect(push).toHaveBeenCalledWith('/my-orders?placed=7');
   });
 
+  async function fillAddressAndPlace() {
+    await userEvent.type(await screen.findByLabelText('Full name'), 'Customer Dev');
+    await userEvent.type(screen.getByLabelText('Phone'), '0123456789');
+    await userEvent.type(screen.getByLabelText('Address'), '1 Main St');
+    await userEvent.type(screen.getByLabelText('City'), 'Ho Chi Minh City');
+    await userEvent.type(screen.getByLabelText('Country'), 'Vietnam');
+    await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
+  }
+
+  it('an expired session while placing the order shows the login link', async () => {
+    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+    vi.mocked(orderService.placeOrder).mockRejectedValue(new ApiError(401, {}));
+
+    render(<CheckoutPage />);
+    await fillAddressAndPlace();
+
+    expect(await screen.findByRole('link', { name: 'Log in again' })).toBeInTheDocument();
+  });
+
+  it('an already ordered checkout points to my orders', async () => {
+    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+    vi.mocked(orderService.placeOrder).mockRejectedValue(new ApiError(400, { detail: 'already ordered' }));
+
+    render(<CheckoutPage />);
+    await fillAddressAndPlace();
+
+    expect(await screen.findByRole('link', { name: 'See my orders' })).toHaveAttribute('href', '/my-orders');
+  });
+
+  it('limits the note to 255 characters', async () => {
+    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+
+    render(<CheckoutPage />);
+
+    expect(await screen.findByLabelText('Note (optional)')).toHaveAttribute('maxLength', '255');
+  });
+
   it('shows a login prompt on 401/403', async () => {
     vi.mocked(orderService.getCheckout).mockRejectedValue(new ApiError(401, {}));
 

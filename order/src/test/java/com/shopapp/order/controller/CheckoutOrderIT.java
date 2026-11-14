@@ -160,7 +160,8 @@ class CheckoutOrderIT {
     void createCheckout_notOrderable_returns404() throws Exception {
         mockMvc.perform(json(post("/storefront/checkouts"),
                 "{\"checkoutItemPostVms\":[{\"productId\":1,\"quantity\":1}]}").with(customer("u-1")))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.detail").value("Product 1 is not available for ordering"));
 
         assertThat(checkoutRepository.findAll()).isEmpty();
     }
@@ -307,4 +308,46 @@ class CheckoutOrderIT {
         mockMvc.perform(json(post("/storefront/checkouts"), "{\"checkoutItemPostVms\":[{\"productId\":25,\"quantity\":1}]}"))
             .andExpect(status().is4xxClientError());
     }
+
+    @Test
+    void placeOrder_concurrentCalls_createExactlyOneOrder() throws Exception {
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+        int callers = 6;
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(callers);
+        java.util.List<java.util.concurrent.Future<Integer>> statuses = new java.util.ArrayList<>();
+        for (int i = 0; i < callers; i++) {
+            statuses.add(pool.submit(() -> {
+                start.await();
+                return mockMvc.perform(placeOrder(checkoutId, "").with(customer("u-1")))
+                    .andReturn().getResponse().getStatus();
+            }));
+        }
+        start.countDown();
+        java.util.List<Integer> codes = new java.util.ArrayList<>();
+        for (java.util.concurrent.Future<Integer> status : statuses) {
+            codes.add(status.get());
+        }
+        pool.shutdown();
+
+        assertThat(codes).filteredOn(code -> code == 200).hasSize(1);
+        assertThat(codes).filteredOn(code -> code == 400).hasSize(callers - 1);
+        assertThat(orderRepository.findAll()).hasSize(1);
+        mockMvc.perform(get("/storefront/orders/checkout/{id}", checkoutId).with(customer("u-1")))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    void longNotes_return400FieldErrors() throws Exception {
+        String longNote = "x".repeat(256);
+        mockMvc.perform(json(post("/storefront/checkouts"), "{\"note\":\"" + longNote
+                + "\",\"checkoutItemPostVms\":[{\"productId\":25,\"quantity\":1}]}").with(customer("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.fieldErrors").isNotEmpty());
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+        mockMvc.perform(placeOrder(checkoutId, ",\"note\":\"" + longNote + "\"").with(customer("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.fieldErrors").isNotEmpty());
+    }
 }
+

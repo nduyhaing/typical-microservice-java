@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -47,22 +48,31 @@ public class OrderService {
 
     public OrderVm createOrder(OrderPostVm orderPostVm) {
         Checkout[] ordered = new Checkout[1];
-        OrderVm order = transactionTemplate.execute(status -> {
-            Checkout checkout = checkoutRepository.findById(orderPostVm.checkoutId())
-                .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CHECKOUT_NOT_FOUND,
-                    orderPostVm.checkoutId()));
-            CheckoutService.requireOwner(checkout);
-            if (checkout.getCheckoutState() != CheckoutState.PENDING) {
-                throw new BadRequestException(Constants.ErrorCode.CHECKOUT_ALREADY_ORDERED, checkout.getId());
-            }
-            ordered[0] = checkout;
-            return saveOrder(checkout, orderPostVm);
-        });
+        OrderVm order;
+        try {
+            order = transactionTemplate.execute(status -> placeOrderInTransaction(orderPostVm, ordered));
+        } catch (DataIntegrityViolationException ex) {
+            // the unique index on order.checkout_id caught a concurrent second order (decisions.md 2c-8)
+            throw new BadRequestException(Constants.ErrorCode.CHECKOUT_ALREADY_ORDERED, orderPostVm.checkoutId());
+        }
         // after the order is committed: the cart is cleaned up best effort (decisions.md 2c-5)
         cartService.removeOrderedItems(ordered[0].getCheckoutItems().stream()
             .map(item -> new CartItemDeleteVm(item.getProductId(), item.getQuantity()))
             .toList());
         return order;
+    }
+
+    private OrderVm placeOrderInTransaction(OrderPostVm orderPostVm, Checkout[] ordered) {
+        // row lock: a concurrent call for the same checkout waits here, then sees COMPLETED
+        Checkout checkout = checkoutRepository.findWithLockById(orderPostVm.checkoutId())
+            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CHECKOUT_NOT_FOUND,
+                orderPostVm.checkoutId()));
+        CheckoutService.requireOwner(checkout);
+        if (checkout.getCheckoutState() != CheckoutState.PENDING) {
+            throw new BadRequestException(Constants.ErrorCode.CHECKOUT_ALREADY_ORDERED, checkout.getId());
+        }
+        ordered[0] = checkout;
+        return saveOrder(checkout, orderPostVm);
     }
 
     private OrderVm saveOrder(Checkout checkout, OrderPostVm orderPostVm) {

@@ -15,7 +15,7 @@ public record OrderPostVm(
     @NotBlank String checkoutId,
     @NotNull @Valid OrderAddressPostVm shippingAddressPostVm,
     @Valid OrderAddressPostVm billingAddressPostVm,
-    @Size(max = 1000) String note,
+    @Size(max = 255) String note,
     @NotNull PaymentMethod paymentMethod
 ) {
 }

@@ -121,4 +121,13 @@ ID token (`id_token_hint`) in the URL; two simultaneous first adds of the same p
 | 2c-5 | After an order is committed, removing its items from the cart is best effort (logged on failure) | Claude | The order is the source of truth; a cart outage must not lose an order | A cart may keep already-ordered items after an outage |
 | 2c-6 | Two shop_app migrations on top of YAS's: order-address location ids nullable (YAS's `bigserial` columns made them mandatory), `order.customer_id` as VARCHAR for Keycloak ids (YAS converted only `checkout.customer_id`) | Claude | YAS schema bugs found by the repository test | — |
 | 2c-7 | Own order view models (`OrderVm` with items and address) instead of YAS's separate get/list shapes | Claude | One shape for confirmation and "My orders" | — |
+| 2c-8 | One order per checkout: the checkout row is locked while an order is placed, and a unique index on `order.checkout_id` (shop_app changeset 0019) guarantees it; a concurrent second "Place order" gets 400 "already ordered". The duplicate orders created by the review's live probe were removed from the local dev database | Claude (review fix) | Parallel "Place order" calls created up to 8 orders for one checkout | — |
+| 2c-9 | Order and checkout notes limited to 255 characters (the column size) with a field error; the storefront caps the note box too, and only suggests "try again" when a retry can work (expired session → log in again, already ordered → My orders) | Claude (review fix) | Long notes failed with a generic error; every failure said "try again" | — |
+
+Deferred from the 2c review (minor): checkout calls the product service inside an open database transaction; the same
+product on two checkout lines makes duplicate cart-cleanup entries and a React key warning; order tax/discount are
+`float` columns (YAS) and must become `BigDecimal` before the tax and promotion slices; the order-by-checkout lookup
+answers 404 vs 403 (reveals whether a checkout id exists; ids are UUIDs); "My orders" doesn't show the shipping address.
+Also fixed on the way: the order service's messages file (copied from YAS without a final newline) had two keys merged
+on one line, so "forbidden" and "product not found" showed raw codes.
 

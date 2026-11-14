@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { FormEvent, useState } from 'react';
 import Alert from 'react-bootstrap/Alert';
@@ -42,7 +43,7 @@ export default function CheckoutPage() {
   const [address, setAddress] = useState<OrderAddress>(EMPTY_ADDRESS);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string>();
+  const [submitError, setSubmitError] = useState<'retry' | 'login' | 'ordered'>();
 
   const notLoggedIn = error instanceof ApiError && (error.status === 401 || error.status === 403);
   const notFound = error instanceof ApiError && error.status === 404;
@@ -63,8 +64,15 @@ export default function CheckoutPage() {
         paymentMethod: 'COD',
       });
       await router.push(`/my-orders?placed=${order.id}`);
-    } catch {
-      setSubmitError('Your order could not be placed. Please try again.');
+    } catch (error) {
+      // only suggest retrying when a retry can succeed
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        setSubmitError('login');
+      } else if (error instanceof ApiError && error.status === 400) {
+        setSubmitError('ordered');
+      } else {
+        setSubmitError('retry');
+      }
       setSubmitting(false);
     }
   };
@@ -97,11 +105,29 @@ export default function CheckoutPage() {
               </Row>
               <Form.Group controlId="order-note" className="mb-3">
                 <Form.Label>Note (optional)</Form.Label>
-                <Form.Control as="textarea" rows={2} value={note} onChange={(event) => setNote(event.target.value)} />
+                <Form.Control
+                  as="textarea"
+                  rows={2}
+                  maxLength={255}
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                />
               </Form.Group>
               <h2 className="h5">Payment</h2>
               <p>Cash on delivery</p>
-              {submitError && <Alert variant="danger">{submitError}</Alert>}
+              {submitError === 'retry' && (
+                <Alert variant="danger">Your order could not be placed. Please try again.</Alert>
+              )}
+              {submitError === 'login' && (
+                <Alert variant="warning">
+                  Your session has expired. <a href={LOGIN_URL}>Log in again</a>
+                </Alert>
+              )}
+              {submitError === 'ordered' && (
+                <Alert variant="warning">
+                  This checkout has already been ordered. <Link href="/my-orders">See my orders</Link>
+                </Alert>
+              )}
               <Button type="submit" disabled={!complete || submitting}>
                 Place order
               </Button>

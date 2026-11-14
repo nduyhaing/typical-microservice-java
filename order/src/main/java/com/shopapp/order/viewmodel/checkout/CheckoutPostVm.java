@@ -7,7 +7,7 @@ import java.util.List;
 
 /** What the browser sends to start a checkout: product ids and quantities only, never prices. */
 public record CheckoutPostVm(
-    String note,
+    @Size(max = 255) String note,
     @NotEmpty @Size(max = 100) List<@Valid CheckoutItemPostVm> checkoutItemPostVms
 ) {
 }
