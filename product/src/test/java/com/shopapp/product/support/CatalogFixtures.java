@@ -49,6 +49,10 @@ public class CatalogFixtures {
         return categoryRepository.save(category);
     }
 
+    public Category saveCategory(Category category) {
+        return categoryRepository.save(category);
+    }
+
     public Product product(String name, String slug, double price) {
         Product product = new Product();
         product.setName(name);

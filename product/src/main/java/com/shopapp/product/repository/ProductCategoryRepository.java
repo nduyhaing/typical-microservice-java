@@ -23,4 +23,6 @@ public interface ProductCategoryRepository extends JpaRepository<ProductCategory
     Page<ProductCategory> findStorefrontByCategory(@Param("category") Category category, Pageable pageable);
 
     List<ProductCategory> findAllByProductId(Long productId);
+
+    boolean existsByCategoryId(Long categoryId);
 }

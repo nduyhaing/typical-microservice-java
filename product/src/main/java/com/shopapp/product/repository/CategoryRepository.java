@@ -17,6 +17,16 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
 
     List<Category> findByNameContainingIgnoreCase(String name);
 
+    boolean existsByName(String name);
+
+    boolean existsByNameAndIdNot(String name, Long id);
+
+    boolean existsBySlug(String slug);
+
+    boolean existsBySlugAndIdNot(String slug, Long id);
+
+    boolean existsByParentId(Long parentId);
+
     /**
      * Retrieves a list of category names ordered by the number of associated products in descending order.
      * Limits the results based on the given {@link Pageable} parameter.

@@ -41,6 +41,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     List<Product> findAllByIdIn(List<Long> productIds);
 
+    /** Back office: a brand in use by any product (published or not) cannot be deleted. */
+    boolean existsByBrandId(Long brandId);
+
     @Query(value = "FROM Product p WHERE p.isFeatured = TRUE "
             + "AND p.isVisibleIndividually = TRUE "
             + "AND p.isPublished = TRUE ORDER BY p.id ASC ")

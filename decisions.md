@@ -132,3 +132,12 @@ answers 404 vs 403 (reveals whether a checkout id exists; ids are UUIDs); "My or
 Also fixed on the way: the order service's messages file (copied from YAS without a final newline) had two keys merged
 on one line, so "forbidden" and "product not found" showed raw codes.
 
+### 3a — Back office foundation + catalog admin
+
+| # | Decision | By | Why | Cost if wrong |
+|---|---|---|---|---|
+| 3a-10 | Product admin endpoints live in the existing controllers/services (YAS layout: one controller per resource serving `/storefront` and `/backoffice` paths); ADMIN is enforced by the path rule in `SecurityConfig` | Claude | YAS parity, no duplicate classes | — |
+| 3a-11 | Brand and category create/update also refuse a slug used by another brand/category (400 `SLUG_ALREADY_EXISTED_OR_DUPLICATED`); YAS checks only the name | Claude | Slugs address storefront pages; duplicates made one page unreachable | — |
+| 3a-12 | Brand paging (`/storefront` and `/backoffice` `brands/paging`) bounded like the product lists (2a-10) → 400 instead of 500 | Claude | YAS passes any value to `PageRequest.of` | — |
+| 3a-13 | Category parent check walks the parent's ancestors, so "parent = itself" and "parent = own descendant" both give 400 `PARENT_CATEGORY_CANNOT_BE_ITSELF` (YAS logic kept, iterative); category detail `displayOrder` is nullable (YAS's primitive `short` threw NPE for categories without one); delete checks children/products with exists queries instead of loading collections; delete of an unknown category is 404 (YAS 400) | Claude | YAS bugs / consistency | — |
+| 3a-14 | Admin request bodies limit text fields to the column size (255) with a field error; anonymous admin writes without a bearer header are refused by Spring's CSRF check (403) before authentication — never 2xx | Claude | Long values failed as a 500 / generic 400 | — |
