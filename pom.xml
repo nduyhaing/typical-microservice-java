@@ -19,10 +19,13 @@
 
     <modules>
         <module>common-library</module>
+        <module>product</module>
     </modules>
 
     <properties>
         <revision>1.0-SNAPSHOT</revision>
+        <!-- release candidate: the GA train for Boot 4.1 is not out yet (decisions.md S2-3) -->
+        <spring-cloud.version>2026.0.0-RC2</spring-cloud.version>
         <java.version>27</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -42,6 +45,13 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>com.shopapp</groupId>
                 <artifactId>common-library</artifactId>
@@ -73,6 +83,18 @@
     <build>
         <pluginManagement>
             <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-failsafe-plugin</artifactId>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>integration-test</goal>
+                                <goal>verify</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
