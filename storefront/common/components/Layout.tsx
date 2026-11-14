@@ -6,11 +6,23 @@ import Container from 'react-bootstrap/Container';
 import Nav from 'react-bootstrap/Nav';
 import Navbar from 'react-bootstrap/Navbar';
 import { LOGIN_URL, LOGOUT_URL } from '../../modules/auth/services/AuthenticationService';
+import { getCartItemCount } from '../../modules/cart/services/CartService';
 import { useAuth } from '../hooks/useAuth';
+import { useFetch } from '../hooks/useFetch';
 
-type Props = { title?: string; children: ReactNode; cartCount?: number };
+type Props = { title?: string; children: ReactNode };
 
-function AccountMenu({ cartCount }: { cartCount?: number }) {
+/** Number of items in the cart; hidden while unknown or if the cart can't be read. */
+function CartLink() {
+  const { data: count } = useFetch(getCartItemCount);
+  return (
+    <Nav.Link as={Link} href="/cart">
+      Cart{count ? ` (${count})` : ''}
+    </Nav.Link>
+  );
+}
+
+function AccountMenu() {
   const { authentication, loading } = useAuth();
   if (loading) {
     return null;
@@ -26,9 +38,7 @@ function AccountMenu({ cartCount }: { cartCount?: number }) {
   return (
     <Nav className="align-items-md-center gap-md-2">
       <Navbar.Text className="text-light">{authentication.authenticatedUser?.username}</Navbar.Text>
-      <Nav.Link as={Link} href="/cart">
-        Cart{cartCount ? ` (${cartCount})` : ''}
-      </Nav.Link>
+      <CartLink />
       <Nav.Link as={Link} href="/profile">
         Profile
       </Nav.Link>
@@ -41,7 +51,7 @@ function AccountMenu({ cartCount }: { cartCount?: number }) {
   );
 }
 
-export default function Layout({ title, children, cartCount }: Props) {
+export default function Layout({ title, children }: Props) {
   const pageTitle = title ? `${title} | shop_app` : 'shop_app';
   return (
     <>
@@ -58,7 +68,7 @@ export default function Layout({ title, children, cartCount }: Props) {
               Products
             </Nav.Link>
           </Nav>
-          <AccountMenu cartCount={cartCount} />
+          <AccountMenu />
         </Container>
       </Navbar>
       <Container as="main" className="pb-5">

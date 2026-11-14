@@ -4,7 +4,17 @@ import { PLACEHOLDER_IMAGE } from '../../../common/utils/image';
 import { ProductDetail } from '../models/ProductDetail';
 import { ProductOptions } from '../models/ProductOptions';
 import { ProductVariation } from '../models/ProductVariation';
+import { vi } from 'vitest';
+import { ApiError } from '../../../common/services/ApiClientService';
+import * as authService from '../../auth/services/AuthenticationService';
+import * as cartService from '../../cart/services/CartService';
 import ProductDetails from './ProductDetails';
+
+vi.mock('../../cart/services/CartService');
+vi.mock('../../auth/services/AuthenticationService', async (original) => ({
+  ...(await original<typeof authService>()),
+  redirectToLogin: vi.fn(),
+}));
 
 const galaxy: ProductDetail = {
   id: 1,
@@ -79,5 +89,48 @@ describe('ProductDetails', () => {
     render(<ProductDetails product={bare} options={[]} variations={[]} />);
 
     expect(screen.getByRole('img', { name: 'USB-C Cable' }).getAttribute('src')).toContain(PLACEHOLDER_IMAGE);
+  });
+
+  describe('add to cart', () => {
+    afterEach(() => vi.resetAllMocks());
+
+    it('is disabled until a variation is selected', async () => {
+      render(<ProductDetails product={galaxy} options={options} variations={variations} />);
+
+      expect(screen.getByRole('button', { name: 'Add to cart' })).toBeDisabled();
+      await userEvent.click(screen.getByRole('button', { name: 'Violet' }));
+      expect(screen.getByRole('button', { name: 'Add to cart' })).toBeEnabled();
+    });
+
+    it('posts the selected variation id and quantity', async () => {
+      vi.mocked(cartService.addToCart).mockResolvedValue(undefined);
+      render(<ProductDetails product={galaxy} options={options} variations={variations} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Violet' }));
+      await userEvent.clear(screen.getByLabelText('Quantity'));
+      await userEvent.type(screen.getByLabelText('Quantity'), '2');
+      await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+      expect(cartService.addToCart).toHaveBeenCalledWith(3, 2);
+      expect(await screen.findByText('Added to your cart.')).toBeInTheDocument();
+    });
+
+    it('adds the product itself when it has no options', async () => {
+      vi.mocked(cartService.addToCart).mockResolvedValue(undefined);
+      render(<ProductDetails product={bare} options={[]} variations={[]} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+      expect(cartService.addToCart).toHaveBeenCalledWith(bare.id, 1);
+    });
+
+    it('when anonymous, redirects to login', async () => {
+      vi.mocked(cartService.addToCart).mockRejectedValue(new ApiError(403, {}));
+      render(<ProductDetails product={bare} options={[]} variations={[]} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+      expect(authService.redirectToLogin).toHaveBeenCalled();
+    });
   });
 });

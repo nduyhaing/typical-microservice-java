@@ -1,15 +1,20 @@
 import Image from 'next/image';
 import { useState } from 'react';
+import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
+import Form from 'react-bootstrap/Form';
 import Col from 'react-bootstrap/Col';
 import Row from 'react-bootstrap/Row';
 import Table from 'react-bootstrap/Table';
+import { ApiError } from '../../../common/services/ApiClientService';
 import { formatPrice } from '../../../common/utils/format';
 import { imageOrPlaceholder } from '../../../common/utils/image';
 import { ProductDetail } from '../models/ProductDetail';
 import { ProductOptions } from '../models/ProductOptions';
 import { ProductVariation } from '../models/ProductVariation';
 import { findVariation } from '../utils/variation';
+import { redirectToLogin } from '../../auth/services/AuthenticationService';
+import { addToCart } from '../../cart/services/CartService';
 
 type Props = {
   product: ProductDetail;
@@ -19,9 +24,30 @@ type Props = {
 
 export default function ProductDetails({ product, options, variations }: Props) {
   const [selected, setSelected] = useState<Record<number, string>>({});
+  const [quantityText, setQuantityText] = useState('1');
+  const quantity = Math.max(1, Number.parseInt(quantityText, 10) || 1);
+  const [cartMessage, setCartMessage] = useState<{ variant: 'success' | 'danger'; text: string }>();
   const variation = findVariation(variations, selected);
   const price = variation?.price ?? product.price;
   const image = imageOrPlaceholder(variation?.thumbnail?.url || product.thumbnailMediaUrl);
+  // a product with options is bought as one of its variations (variations are products in YAS)
+  const productIdToAdd = product.hasOptions ? variation?.id : product.id;
+
+  const handleAddToCart = async () => {
+    if (productIdToAdd === undefined) {
+      return;
+    }
+    try {
+      await addToCart(productIdToAdd, quantity);
+      setCartMessage({ variant: 'success', text: 'Added to your cart.' });
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        redirectToLogin();
+        return;
+      }
+      setCartMessage({ variant: 'danger', text: 'Could not add to your cart. Please try again.' });
+    }
+  };
 
   return (
     <>
@@ -67,6 +93,31 @@ export default function ProductDetails({ product, options, variations }: Props) 
               })}
             </div>
           ))}
+
+          {product.isAllowedToOrder && (
+            <div className="d-flex align-items-end gap-2 mt-3">
+              <Form.Group controlId="quantity" style={{ width: 100 }}>
+                <Form.Label>Quantity</Form.Label>
+                <Form.Control
+                  type="number"
+                  min={1}
+                  value={quantityText}
+                  onChange={(event) => setQuantityText(event.target.value)}
+                />
+              </Form.Group>
+              <Button variant="primary" disabled={productIdToAdd === undefined} onClick={handleAddToCart}>
+                Add to cart
+              </Button>
+            </div>
+          )}
+          {product.hasOptions && productIdToAdd === undefined && (
+            <p className="small text-muted mt-2">Choose {options.map((option) => option.name).join(' and ')} first.</p>
+          )}
+          {cartMessage && (
+            <Alert variant={cartMessage.variant} className="mt-3 py-2">
+              {cartMessage.text}
+            </Alert>
+          )}
         </Col>
       </Row>
 

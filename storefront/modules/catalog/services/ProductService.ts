@@ -26,5 +26,9 @@ export const getProductVariationsByParentId = (parentId: number) =>
 export const getProductOptionValues = (productId: number) =>
   get<ProductOptionValueGet[]>(`${base}/product-option-combinations/${productId}/values`);
 
+/** Published products by id, with price (used by the cart page). */
+export const getProductsByIds = (ids: number[]) =>
+  get<ProductThumbnail[]>(`${base}/products/list-featured?${ids.map((id) => `productId=${id}`).join('&')}`);
+
 export const getRelatedProductsByProductId = (productId: number) =>
   get<ProductsGet>(`${base}/products/related-products/${productId}`);
