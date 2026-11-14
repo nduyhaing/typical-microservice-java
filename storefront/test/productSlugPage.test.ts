@@ -46,4 +46,10 @@ describe('product page getServerSideProps', () => {
     expect(result).toMatchObject({ props: { options: [], variations: [] } });
     expect(productService.getProductVariationsByParentId).not.toHaveBeenCalled();
   });
+
+  it('a 400 for an odd slug (e.g. an encoded slash) is a not-found page, not a 500', async () => {
+    vi.mocked(productService.getProductDetail).mockRejectedValue(new ApiError(400, '<html>Bad Request</html>'));
+
+    await expect(getServerSideProps(context('galaxy/s24'))).resolves.toEqual({ notFound: true });
+  });
 });

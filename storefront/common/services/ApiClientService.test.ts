@@ -44,4 +44,13 @@ describe('get', () => {
     expect((error as ApiError).status).toBe(404);
     expect((error as ApiError).body).toEqual({ statusCode: '404 NOT_FOUND' });
   });
+
+  it('non-JSON error body (e.g. an HTML 400 page) still rejects with ApiError, not a parse error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Bad Request</html>', { status: 400 })));
+
+    const error = await get('/product/storefront/product/a%25b').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).body).toBe('<html>Bad Request</html>');
+  });
 });

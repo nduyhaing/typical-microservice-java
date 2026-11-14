@@ -38,7 +38,7 @@ public class ProductDetailService {
     private final MediaService mediaService;
 
     public ProductDetailGetVm getProductDetail(String slug) {
-        Product product = productRepository.findBySlugAndIsPublishedTrue(slug)
+        Product product = productRepository.findBySlugAndIsPublishedTrueAndIsVisibleIndividuallyTrue(slug)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, slug));
         List<String> imageUrls = product.getProductImages().stream()
             .map(image -> mediaService.getMedia(image.getImageId()).url())
@@ -62,7 +62,7 @@ public class ProductDetailService {
     }
 
     public List<ProductVariationGetVm> getProductVariationsByParentId(Long id) {
-        Product parent = productRepository.findById(id)
+        Product parent = productRepository.findByIdAndIsPublishedTrue(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
         if (!parent.isHasOptions()) {
             return List.of();
@@ -75,7 +75,7 @@ public class ProductDetailService {
 
     /** The distinct option/value pairs used by the product's variations (YAS de-duplicates the same way). */
     public List<ProductOptionCombinationGetVm> getOptionValues(Long productId) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdAndIsPublishedTrue(productId)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, productId));
         Map<List<Object>, ProductOptionCombinationGetVm> distinct = new LinkedHashMap<>();
         productOptionCombinationRepository.findAllByParentProductId(product.getId()).stream()

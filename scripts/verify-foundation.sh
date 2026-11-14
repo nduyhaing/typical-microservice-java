@@ -156,6 +156,9 @@ check_storefront() {
     check_http "unknown product page is a 404" "$(url storefront /products/does-not-exist)" 404
     check_body "unknown product API is a 404 ErrorVm" "$(url storefront /api/product/storefront/product/does-not-exist)" 404         '"statusCode":"404 NOT_FOUND"'
     check_http "unpublished product is never exposed" "$(url storefront /api/product/storefront/product/prototype-phone)" 404
+    check_http "variation has no page of its own" "$(url storefront /products/galaxy-s24-black)" 404
+    check_http "odd slug (encoded slash) is a 404, not a 500" "$(url storefront /products/galaxy%2Fs24)" 404
+    check_http "huge page number is a 400, not a 500"         "$(url storefront '/api/product/storefront/products?pageNo=2147483647')" 400
 }
 
 run_checks() {

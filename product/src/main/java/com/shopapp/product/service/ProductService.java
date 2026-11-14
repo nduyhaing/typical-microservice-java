@@ -72,13 +72,12 @@ public class ProductService {
     }
 
     public ProductsGetVm getRelatedProductsStorefront(Long id, int pageNo, int pageSize) {
-        Product product = productRepository.findById(id)
+        Product product = productRepository.findByIdAndIsPublishedTrue(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
-        Page<ProductRelated> relatedPage = productRelatedRepository.findAllByProduct(product,
+        Page<ProductRelated> relatedPage = productRelatedRepository.findStorefrontRelated(product,
             PageRequest.of(pageNo, pageSize));
         List<ProductThumbnailGetVm> related = relatedPage.stream()
             .map(ProductRelated::getRelatedProduct)
-            .filter(Product::isPublished)
             .map(this::toThumbnailGetVm)
             .toList();
         return new ProductsGetVm(related, relatedPage.getNumber(), relatedPage.getSize(),

@@ -120,4 +120,24 @@ class ProductDetailControllerIT extends AbstractStorefrontIT {
         mockMvc.perform(get("/storefront/product-option-combinations/{id}/values", 999_999))
             .andExpect(status().isNotFound());
     }
+
+    @Test
+    void getProductDetail_variationSlug_returns404() throws Exception {
+        galaxyWithVariations();
+
+        mockMvc.perform(get("/storefront/product/galaxy-s24-violet")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void idEndpoints_unpublishedParent_return404() throws Exception {
+        Product parent = galaxyWithVariations();
+        parent.setPublished(false);
+        fixtures.save(parent);
+
+        mockMvc.perform(get("/storefront/product-variations/{id}", parent.getId())).andExpect(status().isNotFound());
+        mockMvc.perform(get("/storefront/product-option-combinations/{id}/values", parent.getId()))
+            .andExpect(status().isNotFound());
+        mockMvc.perform(get("/storefront/products/related-products/{id}", parent.getId()))
+            .andExpect(status().isNotFound());
+    }
 }

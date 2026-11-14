@@ -20,6 +20,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Optional<Product> findBySlugAndIsPublishedTrue(String slug);
 
+    /** Storefront detail: variations (not listed on their own) have no page of their own (decisions.md 2a-15). */
+    Optional<Product> findBySlugAndIsPublishedTrueAndIsVisibleIndividuallyTrue(String slug);
+
+    Optional<Product> findByIdAndIsPublishedTrue(Long id);
+
     Optional<Product> findByGtinAndIsPublishedTrue(String gtin);
 
     Optional<Product> findBySkuAndIsPublishedTrue(String sku);
@@ -33,7 +38,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             + "AND p.isPublished = TRUE ORDER BY p.id ASC ")
     Page<Product> getFeaturedProduct(Pageable pageable);
 
-    @Query(value = "SELECT p FROM Product p LEFT JOIN p.productCategories pc LEFT JOIN pc.category c "
+    @Query(value = "SELECT DISTINCT p FROM Product p LEFT JOIN p.productCategories pc LEFT JOIN pc.category c "
             + "WHERE LOWER(p.name) LIKE %:productName% "
             + "AND (c.slug = :categorySlug OR (:categorySlug IS NULL OR :categorySlug = '')) "
             + "AND (:startPrice IS NULL OR p.price >= :startPrice) "

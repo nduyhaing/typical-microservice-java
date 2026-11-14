@@ -124,4 +124,46 @@ class ProductListControllerIT extends AbstractStorefrontIT {
             .andExpect(jsonPath("$.productContent[*].slug").value(containsInAnyOrder("b", "c")))
             .andExpect(jsonPath("$.productContent[*].slug").value(not(hasItem("hidden"))));
     }
+
+    @Test
+    void products_hugePageNo_returns400() throws Exception {
+        mockMvc.perform(get("/storefront/products").param("pageNo", "2147483647"))
+            .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/storefront/products").param("pageNo", "500000000"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void products_hugePageSize_returns400() throws Exception {
+        mockMvc.perform(get("/storefront/products").param("pageSize", "100000000"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void products_productInTwoCategories_listedOnce() throws Exception {
+        Category phones = fixtures.category("Phones", "phones");
+        Category deals = fixtures.category("Deals", "deals");
+        Product galaxy = fixtures.product("Galaxy", "galaxy", 799);
+        fixtures.inCategory(galaxy, phones);
+        fixtures.inCategory(galaxy, deals);
+
+        // page size 1 forces Spring Data to run the count query, where duplicates would show
+        mockMvc.perform(get("/storefront/products").param("pageSize", "1"))
+            .andExpect(jsonPath("$.productContent.length()").value(1))
+            .andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.totalPages").value(1));
+    }
+
+    @Test
+    void relatedProducts_excludeVariations() throws Exception {
+        Product a = fixtures.product("A", "a", 1);
+        Product b = fixtures.product("B", "b", 2);
+        Product variation = fixtures.variation(b, "B Red", "b-red", 2);
+        fixtures.related(a, b);
+        fixtures.related(a, variation);
+
+        mockMvc.perform(get("/storefront/products/related-products/{id}", a.getId()))
+            .andExpect(jsonPath("$.productContent[*].slug").value(containsInAnyOrder("b")))
+            .andExpect(jsonPath("$.totalElements").value(1));
+    }
 }

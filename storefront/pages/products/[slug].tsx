@@ -19,13 +19,16 @@ type Props = {
   variations: ProductVariation[];
 };
 
-/** Server-rendered like YAS's product page: an unknown or unpublished slug is a real 404. */
+/**
+ * Server-rendered like YAS's product page. Any 4xx for the slug (unknown, unpublished, a variation, or a slug
+ * the server rejects such as an encoded slash) is a real 404 page; 5xx still surface as an error page.
+ */
 export const getServerSideProps: GetServerSideProps<Props> = async ({ params }) => {
   let product: ProductDetail;
   try {
     product = await getProductDetail(String(params?.slug));
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
       return { notFound: true };
     }
     throw error;

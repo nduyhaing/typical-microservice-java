@@ -19,10 +19,21 @@ export function apiBaseUrl(): string {
   return '/api';
 }
 
+/** JSON when the body is JSON; otherwise the raw text (error pages from proxies or Tomcat are HTML). */
+function parseBody(text: string): unknown {
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export async function get<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBaseUrl()}${path}`, { headers: { Accept: 'application/json' } });
-  const text = await response.text();
-  const body: unknown = text ? JSON.parse(text) : null;
+  const body = parseBody(await response.text());
   if (!response.ok) {
     throw new ApiError(response.status, body);
   }

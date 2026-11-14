@@ -69,9 +69,17 @@ a git checkout; expected 4xx logged at ERROR; a service's own `messages.properti
 | 2a-7 | Java services in Docker on `eclipse-temurin:27-jre`; storefront on `node:24-alpine`; none published on host ports | Claude | YAS style; loopback-only rule | — |
 | 2a-8 | Storefront category and brand product lists hide unpublished products and variations (YAS shows unpublished products in category lists and variations in both) | Claude | Shoppers must only see sellable, individually listed products | — |
 | 2a-9 | `common-library` messages renamed to `messages/common-messages.properties`; lookups try the service's `messages/messages.properties` first, then the library's (closes slice-1 deferred minor) | Claude | A service bundle used to hide the library's codes | — |
-| 2a-10 | Storefront paging parameters validated (`pageNo >= 0`, `pageSize >= 1`) → 400 instead of 500 | Claude | Bad input must not look like a server failure | — |
+| 2a-10 | Storefront paging parameters validated (`0 <= pageNo <= 10,000,000`, `1 <= pageSize <= 100`) → 400 instead of 500 (huge page numbers overflowed the SQL offset; huge page sizes would fan out to media calls) | Claude (+ review fix) | Bad input must not look like a server failure | Clients needing > 100 per page must page |
 | 2a-11 | Media lookups in 2a: empty URL when the media id is null, the media URL is not configured, or the media service fails; no retry/circuit breaker until slice 3 | Claude | Media service doesn't exist yet | — |
 | 2a-12 | Product Liquibase context defaults to `default`, never empty: an empty context list makes Liquibase run every changeset, including the sample data | Claude | Found by `LiquibaseSchemaIT` once the seed existed | — |
 | 2a-13 | Healthchecks for Java service containers run `bash -c` with `/dev/tcp` (the JRE image has no curl/wget and its `sh` is dash) | Claude | Container stayed "unhealthy" while the app was up | — |
 | 2a-14 | Storefront toolchain: TypeScript 6.0.3 (TypeScript 7 is the new native compiler; Next.js type-checking relies on the JavaScript compiler API), ESLint 9.39.5 (Next's import/jsx-a11y plugins don't declare ESLint 10 support), Vitest for tests; all versions pinned exactly | Claude | Newest versions that work together | Upgrade when the plugins catch up |
+| 2a-15 | Variations (not listed on their own) have no detail page, and id-based storefront endpoints (variations, option values, related) 404 for unpublished products (YAS serves both) | Claude (review fix) | Hidden products must not be reachable by URL or id | — |
+| 2a-16 | "All products" uses `SELECT DISTINCT` so a product in two categories is listed once with correct totals (YAS lists it once per category) | Claude (review fix) | YAS bug | — |
+| 2a-17 | Related products filtered in the query (published and listed on their own), so pages and totals are right and variations never show (YAS filters published in memory after paging) | Claude (review fix) | YAS bug | — |
+| 2a-18 | Storefront: any 4xx for a product slug renders the 404 page; the API client tolerates non-JSON error bodies (proxy/Tomcat HTML) | Claude (review fix) | Odd slugs (encoded `/` or `%`) crashed the page with a 500 | — |
+
+Deferred from the 2a review (minor): `productName` filter treats `%`/`_` as wildcards; MediaService needs connect/read
+timeouts when media is wired in (slice 3); storefront container runs as root; free-text `specification` not shown on
+the product page; a failing variations/option-values call fails the whole product page instead of hiding options.
 
