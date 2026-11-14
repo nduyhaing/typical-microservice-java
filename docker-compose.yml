@@ -123,6 +123,30 @@ services:
     networks:
       - shopapp-network
 
+  nginx:
+    image: nginx:1.30.6
+    environment:
+      DOMAIN: ${DOMAIN}
+      # only substitute ${DOMAIN}; leave nginx's own $variables alone
+      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
+    ports:
+      - "${NGINX_HTTP_PORT}:80"
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+    depends_on:
+      identity:
+        condition: service_healthy
+      pgadmin:
+        condition: service_healthy
+      kafka-ui:
+        condition: service_healthy
+    networks:
+      shopapp-network:
+        aliases:
+          # containers reach the public issuer URL through nginx, like browsers do
+          - identity.${DOMAIN}
+          - api.${DOMAIN}
+
 networks:
   shopapp-network:
 
