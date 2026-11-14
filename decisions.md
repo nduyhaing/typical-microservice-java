@@ -19,6 +19,7 @@ during implementation (the owner asked for automatic implementation with decisio
 | P9 | Implementation runs automatically; decisions recorded in this file instead of asked | User | Owner's request | Owner reviews decisions after the fact |
 | P10 | Commit directly on `master` (no feature branches) | User | Owner's request | No branch to review or discard as a unit |
 | P11 | Push `master` to GitHub after each commit, automatically | User | Owner's request | Unreviewed work becomes public immediately |
+| P12 | Latest Lombok (1.18.48), MapStruct (1.7.0.Beta2 — a beta; newest final is 1.6.3) and JaCoCo (0.8.16), versions pinned in the parent POM | User | Owner's request | MapStruct beta bugs; fall back to 1.6.3 if one bites |
 
 ## Slice 1 — Foundation (merged)
 
@@ -70,3 +71,5 @@ a git checkout; expected 4xx logged at ERROR; a service's own `messages.properti
 | 2a-9 | `common-library` messages renamed to `messages/common-messages.properties`; lookups try the service's `messages/messages.properties` first, then the library's (closes slice-1 deferred minor) | Claude | A service bundle used to hide the library's codes | — |
 | 2a-10 | Storefront paging parameters validated (`pageNo >= 0`, `pageSize >= 1`) → 400 instead of 500 | Claude | Bad input must not look like a server failure | — |
 | 2a-11 | Media lookups in 2a: empty URL when the media id is null, the media URL is not configured, or the media service fails; no retry/circuit breaker until slice 3 | Claude | Media service doesn't exist yet | — |
+| 2a-12 | Product Liquibase context defaults to `default`, never empty: an empty context list makes Liquibase run every changeset, including the sample data | Claude | Found by `LiquibaseSchemaIT` once the seed existed | — |
+| 2a-13 | Healthchecks for Java service containers run `bash -c` with `/dev/tcp` (the JRE image has no curl/wget and its `sh` is dash) | Claude | Container stayed "unhealthy" while the app was up | — |
