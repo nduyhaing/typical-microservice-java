@@ -23,6 +23,7 @@
         <module>storefront-bff</module>
         <module>cart</module>
         <module>customer</module>
+        <module>order</module>
     </modules>
 
     <properties>
