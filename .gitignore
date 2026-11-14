@@ -1,0 +1,6 @@
+target/
+.idea/
+*.iml
+.vscode/
+.flattened-pom.xml
+.superpowers/
