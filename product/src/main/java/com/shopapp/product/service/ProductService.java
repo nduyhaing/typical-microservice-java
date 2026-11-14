@@ -71,6 +71,14 @@ public class ProductService {
             .stream().map(this::toThumbnailVm).toList();
     }
 
+    /** Thumbnails (with price) of the requested published products; unknown or hidden ids are left out. */
+    public List<ProductThumbnailGetVm> getFeaturedProductsById(List<Long> productIds) {
+        return productRepository.findAllByIdIn(productIds).stream()
+            .filter(Product::isPublished)
+            .map(this::toThumbnailGetVm)
+            .toList();
+    }
+
     public ProductsGetVm getRelatedProductsStorefront(Long id, int pageNo, int pageSize) {
         Product product = productRepository.findByIdAndIsPublishedTrue(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));

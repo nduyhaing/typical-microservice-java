@@ -166,4 +166,21 @@ class ProductListControllerIT extends AbstractStorefrontIT {
             .andExpect(jsonPath("$.productContent[*].slug").value(containsInAnyOrder("b")))
             .andExpect(jsonPath("$.totalElements").value(1));
     }
+
+    @Test
+    void listFeatured_returnsPublishedRequestedProducts() throws Exception {
+        Product a = fixtures.product("A", "a", 10);
+        Product b = fixtures.product("B", "b", 20);
+        Product hidden = fixtures.product("Hidden", "hidden", 30);
+        hidden.setPublished(false);
+        fixtures.save(hidden);
+
+        mockMvc.perform(get("/storefront/products/list-featured")
+                .param("productId", String.valueOf(a.getId()), String.valueOf(hidden.getId()), "999999"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].slug").value(containsInAnyOrder("a")))
+            .andExpect(jsonPath("$[0].price").value(10.0));
+        mockMvc.perform(get("/storefront/products/list-featured").param("productId", String.valueOf(b.getId())))
+            .andExpect(jsonPath("$[0].name").value("B"));
+    }
 }

@@ -5,6 +5,7 @@ import com.shopapp.product.service.ProductService;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
+import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
 import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
 import com.shopapp.product.viewmodel.product.ProductsGetVm;
@@ -56,6 +57,13 @@ public class ProductController {
         @RequestParam(value = "endPrice", required = false) Double endPrice) {
         return ResponseEntity.ok(productService.getProductsByMultiQuery(pageNo, pageSize, productName, categorySlug,
             startPrice, endPrice));
+    }
+
+    /** Used by the cart service and the cart page to look up products by id (YAS name kept). */
+    @GetMapping("/storefront/products/list-featured")
+    public ResponseEntity<List<ProductThumbnailGetVm>> getFeaturedProductsById(
+        @RequestParam("productId") List<Long> productIds) {
+        return ResponseEntity.ok(productService.getFeaturedProductsById(productIds));
     }
 
     @GetMapping("/storefront/category/{categorySlug}/products")
