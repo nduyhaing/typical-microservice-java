@@ -9,7 +9,7 @@ The system is built in slices; each ends in something that runs end to end.
 1. **Foundation** — parent POM, `common-library`, Postgres, Keycloak, Kafka, nginx *(done)*
 2. Core shopping flow, in three steps:
    - **2a Browse** — product service, storefront-bff, storefront catalog pages *(done)*
-   - 2b Log in + cart — customer and cart services, Keycloak login through the BFF
+   - **2b Log in + cart** — Keycloak login through the BFF (Redis sessions), customer and cart services, cart page *(done)*
    - 2c Checkout — order service, checkout, "my orders"
 3. Back office: backoffice-bff, backoffice UI, media, inventory, tax, location
 4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
@@ -51,6 +51,11 @@ Notes:
   http://localhost:3000. Server-side rendering calls the BFF at `API_BASE_PATH_SERVER`
   (default `http://localhost:8087/api`); browser calls go to `/api` on the page's own host, so use the
   storefront through `http://storefront.shopapp.local` for the full flow.
+- **Login**: the storefront's "Log in" goes through storefront-bff to Keycloak. The BFF keeps the tokens in its
+  Redis-backed session and relays the access token to the APIs; the browser only has a session cookie.
+  Logging out also ends the Keycloak session.
+- **Keycloak volume created before slice 2b?** Run `bash identity/scripts/apply-kc-admin-api-scope.sh` once
+  (adds the admin-API audience scope the customer service needs; fresh volumes get it from the realm file).
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
   After changing it, run `docker compose down -v` to start fresh.
 - **Port 80 already in use?** In `.env` set `NGINX_HTTP_PORT=8000` **and**
@@ -73,9 +78,10 @@ Notes:
 | Keycloak realm `shopapp` | http://identity.shopapp.local/realms/shopapp | users `admin`/`admin` (ADMIN), `customer`/`customer` (CUSTOMER) |
 | pgAdmin | http://pgadmin.shopapp.local | no login (desktop mode); server password `admin` |
 | Kafka UI | http://kafka.shopapp.local | — |
-| **Storefront** | http://storefront.shopapp.local | no login yet (slice 2b) |
+| **Storefront** | http://storefront.shopapp.local | log in as `customer` / `customer` (or register) |
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
+| Cart / customer APIs | http://api.shopapp.local/cart/..., /customer/... | need a Keycloak access token |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |
 
@@ -96,4 +102,6 @@ Keycloak clients: `storefront-bff`, `backoffice-bff`, `customer-management` (con
 - Images: postgres 16.16, pgAdmin 9.19.0, Keycloak 26.8.2, apache/kafka 4.4.0, kafbat/kafka-ui v1.5.0,
   nginx 1.30.6, eclipse-temurin 27-jre (Java services), node 24-alpine (storefront).
 - Storefront: Next.js 16.4.6, React 19.3.1, react-bootstrap 2.10.10, TypeScript 6.0.3, ESLint 9.39.5, Vitest 5.1.0.
+- Redis 7.4.12 for BFF sessions. nginx resolves containers through Docker DNS on each request, so rebuilt
+  containers keep working without restarting nginx.
 - Every decision and its reason: see `decisions.md`.

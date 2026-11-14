@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for shop_app: checks the definition of done of slice 1 (foundation) and slice 2a (browse)
+# Smoke test for shop_app: checks the definition of done of slice 1 (foundation), 2a (browse) and 2b (login + cart)
 # against a running stack.
 #   bash scripts/verify-foundation.sh            # checks the running stack
 #   bash scripts/verify-foundation.sh --restart  # also does `docker compose down && up` and re-checks
@@ -20,8 +20,13 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui product storefront-bff storefront nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer storefront-bff storefront nginx)
 failures=0
+
+# shellcheck source=lib/storefront-login.sh
+source scripts/lib/storefront-login.sh
+COOKIE_JAR=$(mktemp)
+trap 'rm -f "$COOKIE_JAR"' EXIT
 
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; failures=$((failures + 1)); }
@@ -157,8 +162,48 @@ check_storefront() {
     check_body "unknown product API is a 404 ErrorVm" "$(url storefront /api/product/storefront/product/does-not-exist)" 404         '"statusCode":"404 NOT_FOUND"'
     check_http "unpublished product is never exposed" "$(url storefront /api/product/storefront/product/prototype-phone)" 404
     check_http "variation has no page of its own" "$(url storefront /products/galaxy-s24-black)" 404
-    check_http "odd slug (encoded slash) is a 404, not a 500" "$(url storefront /products/galaxy%2Fs24)" 404
+    local odd_slug_code
+    odd_slug_code=$(curl -s -o /dev/null -w '%{http_code}' "$(url storefront /products/galaxy%2Fs24)" || true)
+    case "$odd_slug_code" in
+        400|404) pass "odd slug (encoded slash) is rejected with $odd_slug_code, not a 500" ;;
+        *) fail "odd slug (encoded slash) -> $odd_slug_code, expected 400 or 404" ;;
+    esac
     check_http "huge page number is a 400, not a 500"         "$(url storefront '/api/product/storefront/products?pageNo=2147483647')" 400
+}
+
+check_login_and_cart() {
+    local base product_id violet_id
+    base=$(url storefront "")
+    check_body "anonymous session is not logged in" "$(url storefront /authentication)" 200 '"isAuthenticated":false'
+    check_http "anonymous cart call is rejected" "$(url storefront /api/cart/storefront/cart/items)" 403
+    if ! storefront_login "$COOKIE_JAR" "$base" customer customer; then
+        fail "login as customer through storefront-bff + Keycloak"
+        return
+    fi
+    pass "login as customer through storefront-bff + Keycloak"
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /api/customer/storefront/customer/profile)" | grep -q '"username":"customer"'; then
+        pass "profile through the BFF (token relayed to the customer service)"
+    else
+        fail "profile through the BFF"
+    fi
+    product_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-s24)"         | python -c "import json,sys;print(json.load(sys.stdin)['id'])")
+    violet_id=$(curl -s "$(url storefront "/api/product/storefront/product-variations/$product_id")"         | python -c "import json,sys;print(next(v['id'] for v in json.load(sys.stdin) if v['slug']=='galaxy-s24-violet'))")
+    # (|| true: with MSYS_NO_PATHCONV, Windows curl cannot write to /dev/null and exits non-zero)
+    curl -s -o /dev/null -b "$COOKIE_JAR" -X DELETE "$(url storefront "/api/cart/storefront/cart/items/$violet_id")" || true
+    curl -s -o /dev/null -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"productId\":$violet_id,\"quantity\":2}" "$(url storefront /api/cart/storefront/cart/items)" || true
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /api/cart/storefront/cart/items)"         | grep -q "\"productId\":$violet_id,\"quantity\":2"; then
+        pass "add Galaxy S24 Violet to the cart and read it back"
+    else
+        fail "add Galaxy S24 Violet to the cart and read it back"
+    fi
+    curl -s -o /dev/null -b "$COOKIE_JAR" -X DELETE "$(url storefront "/api/cart/storefront/cart/items/$violet_id")" || true
+    curl -s -o /dev/null -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" -X POST "$(url storefront /logout)" || true
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /authentication)" | grep -q '"isAuthenticated":false'; then
+        pass "logout ends the session"
+    else
+        fail "logout ends the session"
+    fi
+    check_http "customer service rejects anonymous calls" "$(url api /customer/storefront/customer/profile)" 401
 }
 
 run_checks() {
@@ -172,6 +217,7 @@ run_checks() {
     check_http "API placeholder" "$(url api /)" 404
     check_databases
     check_storefront
+    check_login_and_cart
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

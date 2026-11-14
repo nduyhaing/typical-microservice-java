@@ -96,4 +96,5 @@ the product page; a failing variations/option-values call fails the whole produc
 | 2b-7 | BFF: CSRF disabled and session cookie only, as YAS; logout ends the Keycloak session (OIDC end-session) and returns home; logging out without a session also returns home | Claude | YAS parity; no cross-site forms exist | Revisit CSRF if a cross-site form is added |
 | 2b-8 | nginx resolves backend containers through Docker DNS per request (cached 10 s) instead of once at startup | Claude | Rebuilding any service container (new IP) broke nginx with 502 until restarted | — |
 | 2b-9 | BFF sessions in Redis 7.4.12; BFF tests use a real Redis via Testcontainers | Claude | YAS stores sessions in Redis; restarts keep users logged in | — |
+| 2b-10 | Smoke test drives a real browser-style login (BFF → Keycloak form → BFF callback) with a cookie jar (`scripts/lib/storefront-login.sh`); an encoded slash in a product URL now gets 400 from the BFF's security firewall (accepted: not a 500) | Claude | End-to-end proof of login, token relay, cart and logout | — |
 
