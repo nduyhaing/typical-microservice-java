@@ -21,6 +21,7 @@
         <module>common-library</module>
         <module>product</module>
         <module>storefront-bff</module>
+        <module>cart</module>
     </modules>
 
     <properties>
