@@ -13,4 +13,6 @@ export type CartLine = {
   thumbnailUrl: string;
   price: number;
   quantity: number;
+  /** false when the product was unpublished or removed after it was added: shown, not priced, removable */
+  available: boolean;
 };

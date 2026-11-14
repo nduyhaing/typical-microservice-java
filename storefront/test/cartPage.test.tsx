@@ -13,9 +13,13 @@ vi.mock('../modules/auth/services/AuthenticationService', async (original) => ({
 vi.mock('../modules/cart/services/CartService');
 
 const lines = [
-  { productId: 1, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2 },
-  { productId: 2, name: 'USB-C Cable', slug: 'usb-c-cable', thumbnailUrl: '', price: 19, quantity: 1 },
+  { productId: 1, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2, available: true },
+  { productId: 2, name: 'USB-C Cable', slug: 'usb-c-cable', thumbnailUrl: '', price: 19, quantity: 1, available: true },
 ];
+
+const unavailable = {
+  productId: 9, name: 'Product no longer available', slug: '', thumbnailUrl: '', price: 0, quantity: 4, available: false,
+};
 
 describe('Cart page', () => {
   beforeEach(() => {
@@ -73,4 +77,18 @@ describe('Cart page', () => {
     expect(cartService.removeItem).toHaveBeenCalledWith(2);
     expect(cartService.updateQuantity).not.toHaveBeenCalled();
   });
+
+  it('shows an unavailable item with a Remove button and leaves it out of the total', async () => {
+    vi.mocked(cartService.getCartLines).mockResolvedValue([...lines, unavailable]);
+    vi.mocked(cartService.removeItem).mockResolvedValue(undefined);
+
+    render(<CartPage />);
+
+    expect(await screen.findByText('No longer available')).toBeInTheDocument();
+    expect(screen.getByTestId('cart-total')).toHaveTextContent('$1,657.00');
+    expect(screen.queryByRole('button', { name: 'Increase Product no longer available' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove Product no longer available' }));
+    expect(cartService.removeItem).toHaveBeenCalledWith(9);
+  });
 });
+

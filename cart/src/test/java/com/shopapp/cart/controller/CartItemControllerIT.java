@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.shopapp.cart.PostgresContainerSupport;
 import com.shopapp.cart.model.CartItem;
+import com.shopapp.cart.model.CartItemId;
 import com.shopapp.cart.repository.CartItemRepository;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -207,5 +208,31 @@ class CartItemControllerIT {
             .andExpect(jsonPath("$.statusCode").exists());
         mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":10,\"quantity\":1}"))
             .andExpect(status().is4xxClientError());
+    }
+
+    @Test
+    void add_quantityAboveLimit_returns400() throws Exception {
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":10,\"quantity\":1001}").with(user("u-1")))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void update_hugeQuantity_returns400() throws Exception {
+        stored("u-1", 10L, 1);
+
+        mockMvc.perform(json(put("/storefront/cart/items/10"), "{\"quantity\":2147483647}").with(user("u-1")))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void add_mergeBeyondLimit_returns400AndKeepsQuantity() throws Exception {
+        stored("u-1", 10L, 1000);
+
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":10,\"quantity\":1}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.statusCode").value("400 BAD_REQUEST"));
+
+        org.assertj.core.api.Assertions.assertThat(repository.findById(new CartItemId("u-1", 10L)))
+            .get().extracting(CartItem::getQuantity).isEqualTo(1000);
     }
 }

@@ -12,7 +12,7 @@ vi.mock('../../catalog/services/ProductService');
 describe('getCartLines', () => {
   afterEach(() => vi.resetAllMocks());
 
-  it('joins cart items with product names and prices, dropping products no longer available', async () => {
+  it('joins cart items with product names and prices; unavailable products stay as unavailable lines', async () => {
     vi.mocked(api.get).mockResolvedValue([
       { customerId: 'u', productId: 1, quantity: 2 },
       { customerId: 'u', productId: 2, quantity: 1 },
@@ -26,8 +26,9 @@ describe('getCartLines', () => {
     const lines = await getCartLines();
 
     expect(lines).toEqual([
-      { productId: 1, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2 },
-      { productId: 2, name: 'USB-C Cable', slug: 'usb-c-cable', thumbnailUrl: '', price: 19, quantity: 1 },
+      { productId: 1, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2, available: true },
+      { productId: 2, name: 'USB-C Cable', slug: 'usb-c-cable', thumbnailUrl: '', price: 19, quantity: 1, available: true },
+      { productId: 3, name: 'Product no longer available', slug: '', thumbnailUrl: '', price: 0, quantity: 5, available: false },
     ]);
     expect(productService.getProductsByIds).toHaveBeenCalledWith([1, 2, 3]);
   });

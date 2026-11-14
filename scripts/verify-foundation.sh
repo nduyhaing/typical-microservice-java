@@ -122,8 +122,10 @@ check_ports_loopback_only() {
 }
 
 check_http() {
+    # check_http <name> <url> <expected status> [extra curl args...]
     local name=$1 target=$2 expected=$3 code
-    code=$(curl -s -o /dev/null -w '%{http_code}' "$target" || true)
+    shift 3
+    code=$(curl -s -o /dev/null -w '%{http_code}' "$@" "$target" || true)
     if [ "$code" = "$expected" ]; then pass "$name ($target -> $code)"; else fail "$name ($target -> $code, expected $expected)"; fi
 }
 
@@ -203,6 +205,13 @@ check_login_and_cart() {
     else
         fail "logout ends the session"
     fi
+    local after_logout
+    after_logout=$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" "$(url storefront /api/cart/storefront/cart/items)" || true)
+    case "$after_logout" in
+        401|403) pass "cart calls are rejected after logout ($after_logout)" ;;
+        *) fail "cart call after logout -> $after_logout, expected 401/403" ;;
+    esac
+    check_http "cross-site POST to the BFF is refused" "$(url storefront /logout)" 403 -X POST -H 'Origin: http://evil.example'
     check_http "customer service rejects anonymous calls" "$(url api /customer/storefront/customer/profile)" 401
 }
 

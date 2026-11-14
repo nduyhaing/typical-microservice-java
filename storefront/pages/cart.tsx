@@ -32,7 +32,9 @@ export default function CartPage() {
   const decrease = (line: CartLine) =>
     change(() => (line.quantity <= 1 ? removeItem(line.productId) : updateQuantity(line.productId, line.quantity - 1)));
   const increase = (line: CartLine) => change(() => updateQuantity(line.productId, line.quantity + 1));
-  const total = (lines ?? []).reduce((sum, line) => sum + line.price * line.quantity, 0);
+  const total = (lines ?? [])
+    .filter((line) => line.available)
+    .reduce((sum, line) => sum + line.price * line.quantity, 0);
 
   return (
     <Layout title="Cart">
@@ -57,36 +59,51 @@ export default function CartPage() {
             </tr>
           </thead>
           <tbody>
-            {lines.map((line) => (
-              <tr key={line.productId}>
-                <td>
-                  <Link href={`/products/${line.slug}`}>{line.name}</Link>
-                </td>
-                <td className="text-end">{formatPrice(line.price)}</td>
-                <td className="text-center text-nowrap">
-                  <Button size="sm" variant="outline-secondary" aria-label={`Decrease ${line.name}`}
-                    onClick={() => decrease(line)}>
-                    −
-                  </Button>
-                  <span className="mx-2" data-testid={`quantity-${line.productId}`}>
-                    {line.quantity}
-                  </span>
-                  <Button size="sm" variant="outline-secondary" aria-label={`Increase ${line.name}`}
-                    onClick={() => increase(line)}>
-                    +
-                  </Button>
-                </td>
-                <td className="text-end" data-testid={`line-total-${line.productId}`}>
-                  {formatPrice(line.price * line.quantity)}
-                </td>
-                <td className="text-end">
-                  <Button size="sm" variant="link" className="text-danger"
-                    onClick={() => change(() => removeItem(line.productId))}>
-                    Remove
-                  </Button>
-                </td>
-              </tr>
-            ))}
+            {lines.map((line) =>
+              line.available ? (
+                <tr key={line.productId}>
+                  <td>
+                    <Link href={`/products/${line.slug}`}>{line.name}</Link>
+                  </td>
+                  <td className="text-end">{formatPrice(line.price)}</td>
+                  <td className="text-center text-nowrap">
+                    <Button size="sm" variant="outline-secondary" aria-label={`Decrease ${line.name}`}
+                      onClick={() => decrease(line)}>
+                      −
+                    </Button>
+                    <span className="mx-2" data-testid={`quantity-${line.productId}`}>
+                      {line.quantity}
+                    </span>
+                    <Button size="sm" variant="outline-secondary" aria-label={`Increase ${line.name}`}
+                      onClick={() => increase(line)}>
+                      +
+                    </Button>
+                  </td>
+                  <td className="text-end" data-testid={`line-total-${line.productId}`}>
+                    {formatPrice(line.price * line.quantity)}
+                  </td>
+                  <td className="text-end">
+                    <Button size="sm" variant="link" className="text-danger" aria-label={`Remove ${line.name}`}
+                      onClick={() => change(() => removeItem(line.productId))}>
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={line.productId} className="text-muted">
+                  <td>{line.name}</td>
+                  <td className="text-end">—</td>
+                  <td className="text-center">{line.quantity}</td>
+                  <td className="text-end">No longer available</td>
+                  <td className="text-end">
+                    <Button size="sm" variant="link" className="text-danger" aria-label={`Remove ${line.name}`}
+                      onClick={() => change(() => removeItem(line.productId))}>
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              )
+            )}
           </tbody>
           <tfoot>
             <tr>

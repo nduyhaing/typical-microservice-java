@@ -6,6 +6,9 @@ public final class Constants {
     }
 
 
+    /** Largest quantity of one product in a cart (decisions.md 2b-11). */
+    public static final int MAX_CART_QUANTITY = 1000;
+
     public static final class ErrorCode {
 
         private ErrorCode() {
@@ -17,5 +20,6 @@ public final class Constants {
         public static final String NON_EXISTING_CART_ITEM = "NON_EXISTING_CART_ITEM";
         public static final String ADD_CART_ITEM_FAILED = "ADD_CART_ITEM_FAILED";
         public static final String DUPLICATED_CART_ITEMS_TO_DELETE = "DUPLICATED_CART_ITEMS_TO_DELETE";
+        public static final String QUANTITY_TOO_LARGE = "QUANTITY_TOO_LARGE";
     }
 }

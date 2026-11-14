@@ -11,27 +11,40 @@ export async function getCartItemCount(): Promise<number> {
   return items.reduce((total, item) => total + item.quantity, 0);
 }
 
-/** Cart items with product details; items whose product is no longer available are left out. */
+export const UNAVAILABLE_PRODUCT_NAME = 'Product no longer available';
+
+/**
+ * Cart items with product details. Items whose product is no longer available are kept as unavailable lines, so
+ * the page matches the header count and the customer can remove them.
+ */
 export async function getCartLines(): Promise<CartLine[]> {
   const items = await getCartItems();
   if (items.length === 0) {
     return [];
   }
   const products = await getProductsByIds(items.map((item) => item.productId));
-  return items.flatMap((item) => {
+  return items.map((item) => {
     const product = products.find((candidate) => candidate.id === item.productId);
-    return product
-      ? [
-          {
-            productId: item.productId,
-            name: product.name,
-            slug: product.slug,
-            thumbnailUrl: product.thumbnailUrl,
-            price: product.price ?? 0,
-            quantity: item.quantity,
-          },
-        ]
-      : [];
+    if (!product) {
+      return {
+        productId: item.productId,
+        name: UNAVAILABLE_PRODUCT_NAME,
+        slug: '',
+        thumbnailUrl: '',
+        price: 0,
+        quantity: item.quantity,
+        available: false,
+      };
+    }
+    return {
+      productId: item.productId,
+      name: product.name,
+      slug: product.slug,
+      thumbnailUrl: product.thumbnailUrl,
+      price: product.price ?? 0,
+      quantity: item.quantity,
+      available: true,
+    };
   });
 }
 

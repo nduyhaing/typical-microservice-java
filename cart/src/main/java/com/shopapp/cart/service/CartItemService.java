@@ -117,7 +117,12 @@ public class CartItemService {
     }
 
     private CartItem updateExistingCartItem(CartItemPostVm cartItemPostVm, CartItem existingCartItem) {
-        existingCartItem.setQuantity(existingCartItem.getQuantity() + cartItemPostVm.quantity());
+        // checked in long arithmetic: YAS overflowed int here and stored a negative quantity
+        long merged = (long) existingCartItem.getQuantity() + cartItemPostVm.quantity();
+        if (merged > Constants.MAX_CART_QUANTITY) {
+            throw new BadRequestException(Constants.ErrorCode.QUANTITY_TOO_LARGE, Constants.MAX_CART_QUANTITY);
+        }
+        existingCartItem.setQuantity((int) merged);
         return cartItemRepository.save(existingCartItem);
     }
 
