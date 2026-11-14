@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${POSTGRES_HOST_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT}:5432"
     volumes:
       - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./postgres_init.sql:/docker-entrypoint-initdb.d/postgres_init.sql:ro
@@ -53,7 +53,7 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
       KC_DB_USERNAME: ${POSTGRES_USER}
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_HOSTNAME: http://identity.${DOMAIN}
+      KC_HOSTNAME: ${KEYCLOAK_URL}
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
@@ -93,7 +93,7 @@ services:
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     ports:
-      - "${KAFKA_HOST_PORT}:29092"
+      - "127.0.0.1:${KAFKA_HOST_PORT}:29092"
     volumes:
       - kafka-data:/var/lib/kafka/data
     healthcheck:
@@ -127,10 +127,13 @@ services:
     image: nginx:1.30.6
     environment:
       DOMAIN: ${DOMAIN}
-      # only substitute ${DOMAIN}; leave nginx's own $variables alone
-      NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
+      NGINX_HTTP_PORT: ${NGINX_HTTP_PORT}
+      # only substitute these; leave nginx's own $variables alone
+      NGINX_ENVSUBST_FILTER: "^(DOMAIN|NGINX_HTTP_PORT)$$"
     ports:
-      - "${NGINX_HTTP_PORT}:80"
+      # loopback only: dev credentials must not be reachable from the LAN.
+      # Same port inside and out, so containers can use the public URLs (incl. port) through the aliases below.
+      - "127.0.0.1:${NGINX_HTTP_PORT}:${NGINX_HTTP_PORT}"
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
     depends_on:

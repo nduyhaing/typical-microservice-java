@@ -45,10 +45,13 @@ Notes:
 
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
   After changing it, run `docker compose down -v` to start fresh.
-- **Port 80 already in use?** Set `NGINX_HTTP_PORT` in `.env` (e.g. `8000`) and use
-  `http://<host>.shopapp.local:8000`. Keycloak's issuer stays `http://identity.shopapp.local`
-  (port 80); if you move off port 80 for good, change `KC_HOSTNAME` in `docker-compose.yml` to include
-  the port, or token issuer checks in later slices will fail.
+- **Port 80 already in use?** In `.env` set `NGINX_HTTP_PORT=8000` **and**
+  `KEYCLOAK_URL=http://identity.${DOMAIN}:8000`, then `docker compose up -d`. Use
+  `http://<host>.shopapp.local:8000`. The smoke script checks that both settings agree.
+- All published ports (nginx, Postgres, Kafka) listen on `127.0.0.1` only, so the dev credentials
+  below are not reachable from your network.
+- The realm import (`identity/realm-export.json`) and pgAdmin's `docker/pgadmin/servers.json` are also
+  only read on first start; after editing them, run `docker compose down -v`.
 - To change the domain, edit `DOMAIN` in `.env` (and your hosts file) — nginx and the Keycloak realm
   read it from there.
 

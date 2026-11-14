@@ -17,7 +17,7 @@ PORT="${NGINX_HTTP_PORT:-80}"
 HOSTS=(identity api pgadmin kafka)
 BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
-EXPECTED_ISSUER="http://identity.${DOMAIN}/realms/shopapp"
+EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
 SERVICES=(postgres pgadmin identity kafka kafka-ui nginx)
 failures=0
@@ -90,12 +90,29 @@ EOF
 
 check_in_network_issuer() {
     local config
-    config=$(docker compose exec -T kafka-ui wget -qO- "http://identity.${DOMAIN}/realms/shopapp/.well-known/openid-configuration" 2>/dev/null || true)
+    config=$(docker compose exec -T kafka-ui wget -qO- "${KEYCLOAK_URL}/realms/shopapp/.well-known/openid-configuration" 2>/dev/null || true)
     if echo "$config" | grep -q "\"issuer\":\"$EXPECTED_ISSUER\""; then
         pass "containers reach the issuer at identity.${DOMAIN}"
     else
         fail "containers cannot reach $EXPECTED_ISSUER through nginx"
     fi
+}
+
+check_identity_redirect() {
+    # browsers must be sent back to the public URL (domain and port), not to port 80
+    local location
+    location=$(curl -s -o /dev/null -w '%{redirect_url}' "$(url identity /admin/)" || true)
+    case "$location" in
+        "${KEYCLOAK_URL}"/*) pass "Keycloak redirects stay on ${KEYCLOAK_URL}" ;;
+        *) fail "Keycloak redirects to '${location}', expected ${KEYCLOAK_URL}/... (KEYCLOAK_URL/NGINX_HTTP_PORT mismatch?)" ;;
+    esac
+}
+
+check_ports_loopback_only() {
+    # admin tools with dev credentials must not be reachable from the LAN
+    local exposed
+    exposed=$(docker compose ps --format '{{.Service}} {{.Ports}}' | grep -E '(0\.0\.0\.0|\[::\]|:::)[0-9]*:' || true)
+    if [ -z "$exposed" ]; then pass "published ports listen on 127.0.0.1 only"; else fail "ports exposed on all interfaces: $exposed"; fi
 }
 
 check_http() {
@@ -115,7 +132,9 @@ check_databases() {
 
 run_checks() {
     check_services_healthy
+    check_ports_loopback_only
     check_token
+    check_identity_redirect
     check_in_network_issuer
     check_http "Kafka UI reachable" "$(url kafka /)" 200
     check_http "pgAdmin reachable" "$(url pgadmin /misc/ping)" 200
