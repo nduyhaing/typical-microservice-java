@@ -1,30 +1,43 @@
 package com.shopapp.product.controller;
 
+import com.shopapp.product.service.ProductAdminService;
 import com.shopapp.product.service.ProductDetailService;
 import com.shopapp.product.service.ProductService;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
+import com.shopapp.product.viewmodel.product.ProductDetailVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
+import com.shopapp.product.viewmodel.product.ProductGetDetailVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
+import com.shopapp.product.viewmodel.product.ProductListGetVm;
+import com.shopapp.product.viewmodel.product.ProductPostVm;
+import com.shopapp.product.viewmodel.product.ProductPutVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
 import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
 import com.shopapp.product.viewmodel.product.ProductsGetVm;
 import com.shopapp.product.viewmodel.productoption.ProductOptionCombinationGetVm;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Storefront product endpoints (YAS paths and defaults). Paging values are validated so bad input is a 400,
- * not a 500 from {@code PageRequest.of}.
+ * Storefront and back office product endpoints (YAS paths and defaults). Paging values are validated so bad input
+ * is a 400, not a 500 from {@code PageRequest.of}. {@code /backoffice/**} requires role ADMIN (SecurityConfig).
  */
 @RestController
 @RequiredArgsConstructor
@@ -37,6 +50,46 @@ public class ProductController {
 
     private final ProductService productService;
     private final ProductDetailService productDetailService;
+    private final ProductAdminService productAdminService;
+
+    @GetMapping("/backoffice/products")
+    public ResponseEntity<ProductListGetVm> listProducts(
+        @RequestParam(value = "pageNo", defaultValue = "0", required = false)
+        @Min(0) @Max(MAX_PAGE_NO) int pageNo,
+        @RequestParam(value = "pageSize", defaultValue = "5", required = false)
+        @Min(1) @Max(MAX_PAGE_SIZE) int pageSize,
+        @RequestParam(value = "product-name", defaultValue = "", required = false) String productName,
+        @RequestParam(value = "brand-name", defaultValue = "", required = false) String brandName) {
+        return ResponseEntity.ok(productAdminService.getProducts(pageNo, pageSize, productName, brandName));
+    }
+
+    @GetMapping("/backoffice/products/{productId}")
+    public ResponseEntity<ProductDetailVm> getProductById(@PathVariable long productId) {
+        return ResponseEntity.ok(productAdminService.getProduct(productId));
+    }
+
+    @PostMapping(path = "/backoffice/products", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<ProductGetDetailVm> createProduct(@Valid @RequestBody ProductPostVm productPostVm) {
+        return new ResponseEntity<>(productAdminService.create(productPostVm), HttpStatus.CREATED);
+    }
+
+    @PutMapping(path = "/backoffice/products/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> updateProduct(@PathVariable long id, @Valid @RequestBody ProductPutVm productPutVm) {
+        productAdminService.update(id, productPutVm);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** YAS soft delete: unpublishes the product (decisions.md 3a-17). */
+    @DeleteMapping("/backoffice/products/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable Long id) {
+        productAdminService.delete(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/backoffice/product-variations/{id}")
+    public ResponseEntity<List<ProductVariationGetVm>> getProductVariationsBackoffice(@PathVariable Long id) {
+        return ResponseEntity.ok(productAdminService.getVariations(id));
+    }
 
     @GetMapping("/storefront/products/featured")
     public ResponseEntity<ProductFeatureGetVm> getFeaturedProducts(

@@ -101,7 +101,8 @@ public class ProductDetailService {
         return new ProductAttributeValueVm(value.getProductAttribute().getName(), value.getValue());
     }
 
-    private ProductVariationGetVm toVariationVm(Product variation) {
+    /** Also used by the back office variation list. */
+    public ProductVariationGetVm toVariationVm(Product variation) {
         Map<Long, String> options = productOptionCombinationRepository.findAllByProduct(variation).stream()
             .collect(Collectors.toMap(c -> c.getProductOption().getId(), ProductOptionCombination::getValue));
         Long thumbnailId = variation.getThumbnailMediaId();

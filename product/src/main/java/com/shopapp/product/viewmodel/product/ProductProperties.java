@@ -2,6 +2,7 @@ package com.shopapp.product.viewmodel.product;
 
 import java.util.List;
 
+/** Fields a product and its variations share in the back office create/update bodies (YAS). */
 public interface ProductProperties {
     Long id();
 
@@ -18,5 +19,4 @@ public interface ProductProperties {
     Long thumbnailMediaId();
 
     List<Long> productImageIds();
-
 }

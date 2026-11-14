@@ -27,10 +27,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     /**
      * Products that can be put in an order (decisions.md 2c-2): published, allowed to order, and not a parent with
-     * options (only its variations can be bought).
+     * options (only its variations can be bought). A variation also needs a published parent (decisions.md 3a-17).
      */
-    @Query("SELECT p FROM Product p WHERE p.id IN :productIds AND p.isPublished = TRUE "
-        + "AND p.isAllowedToOrder = TRUE AND p.hasOptions = FALSE ORDER BY p.id ASC")
+    @Query("SELECT p FROM Product p LEFT JOIN p.parent parent WHERE p.id IN :productIds AND p.isPublished = TRUE "
+        + "AND p.isAllowedToOrder = TRUE AND p.hasOptions = FALSE "
+        + "AND (parent IS NULL OR parent.isPublished = TRUE) ORDER BY p.id ASC")
     Page<Product> findOrderableByIds(@Param("productIds") List<Long> productIds, Pageable pageable);
 
     Optional<Product> findByGtinAndIsPublishedTrue(String gtin);
@@ -43,6 +44,33 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     /** Back office: a brand in use by any product (published or not) cannot be deleted. */
     boolean existsByBrandId(Long brandId);
+
+    // Back office uniqueness checks cover every product, published or not (decisions.md 3a-16).
+    boolean existsBySlug(String slug);
+
+    boolean existsBySlugAndIdNot(String slug, Long id);
+
+    boolean existsBySku(String sku);
+
+    boolean existsBySkuAndIdNot(String sku, Long id);
+
+    boolean existsByGtin(String gtin);
+
+    boolean existsByGtinAndIdNot(String gtin, Long id);
+
+    /**
+     * Back office list: every product except variations (managed through their parent), published or not, filtered
+     * by name (contains, case-insensitive) and exact brand name (YAS filters published only and drops products
+     * without a brand when no brand filter is given — decisions.md 3a-16).
+     */
+    @Query(value = "SELECT p FROM Product p LEFT JOIN p.brand b WHERE p.parent IS NULL "
+        + "AND LOWER(p.name) LIKE CONCAT('%', :productName, '%') "
+        + "AND (:brandName = '' OR b.name = :brandName) ORDER BY p.id ASC",
+        countQuery = "SELECT COUNT(p) FROM Product p LEFT JOIN p.brand b WHERE p.parent IS NULL "
+            + "AND LOWER(p.name) LIKE CONCAT('%', :productName, '%') "
+            + "AND (:brandName = '' OR b.name = :brandName)")
+    Page<Product> findForBackoffice(@Param("productName") String productName, @Param("brandName") String brandName,
+                                    Pageable pageable);
 
     @Query(value = "FROM Product p WHERE p.isFeatured = TRUE "
             + "AND p.isVisibleIndividually = TRUE "

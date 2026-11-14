@@ -12,4 +12,6 @@ public interface ProductOptionRepository extends JpaRepository<ProductOption, Lo
 
     @Query("select e from ProductOption e where e.name = ?1 and (?2 is null or e.id != ?2)")
     ProductOption findExistedName(String name, Long id);
+
+    boolean existsByName(String name);
 }
