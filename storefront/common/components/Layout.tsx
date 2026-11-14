@@ -1,13 +1,47 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import { ReactNode } from 'react';
+import Button from 'react-bootstrap/Button';
 import Container from 'react-bootstrap/Container';
 import Nav from 'react-bootstrap/Nav';
 import Navbar from 'react-bootstrap/Navbar';
+import { LOGIN_URL, LOGOUT_URL } from '../../modules/auth/services/AuthenticationService';
+import { useAuth } from '../hooks/useAuth';
 
-type Props = { title?: string; children: ReactNode };
+type Props = { title?: string; children: ReactNode; cartCount?: number };
 
-export default function Layout({ title, children }: Props) {
+function AccountMenu({ cartCount }: { cartCount?: number }) {
+  const { authentication, loading } = useAuth();
+  if (loading) {
+    return null;
+  }
+  if (!authentication?.isAuthenticated) {
+    return (
+      <Nav>
+        {/* a server route on the BFF, so a plain link instead of next/link */}
+        <Nav.Link href={LOGIN_URL}>Log in</Nav.Link>
+      </Nav>
+    );
+  }
+  return (
+    <Nav className="align-items-md-center gap-md-2">
+      <Navbar.Text className="text-light">{authentication.authenticatedUser?.username}</Navbar.Text>
+      <Nav.Link as={Link} href="/cart">
+        Cart{cartCount ? ` (${cartCount})` : ''}
+      </Nav.Link>
+      <Nav.Link as={Link} href="/profile">
+        Profile
+      </Nav.Link>
+      <form action={LOGOUT_URL} method="post" className="d-inline">
+        <Button type="submit" variant="outline-light" size="sm">
+          Log out
+        </Button>
+      </form>
+    </Nav>
+  );
+}
+
+export default function Layout({ title, children, cartCount }: Props) {
   const pageTitle = title ? `${title} | shop_app` : 'shop_app';
   return (
     <>
@@ -24,6 +58,7 @@ export default function Layout({ title, children }: Props) {
               Products
             </Nav.Link>
           </Nav>
+          <AccountMenu cartCount={cartCount} />
         </Container>
       </Navbar>
       <Container as="main" className="pb-5">
