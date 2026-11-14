@@ -53,7 +53,7 @@ a git checkout; expected 4xx logged at ERROR; a service's own `messages.properti
 |---|---|---|---|---|
 | S2-1 | End state: browse products, log in, cart, place an order saved without tax/discount/payment ("pending payment"); images and addresses in slice 3 | User | Agreed scope | — |
 | S2-2 | Split by browser step: 2a browse, 2b login + cart, 2c checkout | User | Clickable result each step | BFF/storefront touched three times |
-| S2-3 | storefront-bff on Spring Cloud Gateway, Spring Cloud 2026.0.0-RC2 pinned until GA | User (proposed by Claude) | Stay on YAS's design | RC bugs |
+| S2-3 | storefront-bff on Spring Cloud Gateway. Spring Cloud has **no train for Boot 4.1** (2025.1 GA → Boot 4.0; 2026.0 RC → Boot 4.2), so: Spring Cloud **2025.1.4 (GA)** on Boot 4.1.2 with the Spring Cloud compatibility verifier disabled in storefront-bff; gateway tests prove the routes work. Move to Boot 4.2 + Spring Cloud 2026.0 when both are GA. (First choice 2026.0.0-RC2 refused to start on Boot 4.1.) | User (gateway) + Claude (versions) | Stay on YAS's design with final releases | A Boot 4.1 incompatibility in a Spring Cloud path not covered by tests |
 | S2-4 | Missing later-slice services handled with fallbacks (e.g. placeholder image) | Claude | Keep slices independent | — |
 
 ### 2a — Browse products

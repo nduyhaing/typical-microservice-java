@@ -1,0 +1,39 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: storefront-bff
+  threads:
+    virtual:
+      enabled: true
+  cloud:
+    # Spring Cloud 2025.1 declares Boot 4.0 only; we run it on Boot 4.1 (decisions.md S2-3).
+    # The gateway tests prove the routes work; re-enable when moving to Boot 4.2 + Spring Cloud 2026.0 GA.
+    compatibility-verifier:
+      enabled: false
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+          routes:
+            # /api/product/... -> api gateway (nginx) /product/...
+            - id: api
+              uri: ${API_BASE_URL:http://api.shopapp.local}
+              predicates:
+                - Path=/api/**
+              filters:
+                - StripPrefix=1
+            # everything else -> the Next.js storefront
+            - id: storefront
+              uri: ${STOREFRONT_URL:http://storefront:3000}
+              predicates:
+                - Path=/**
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus

@@ -20,12 +20,14 @@
     <modules>
         <module>common-library</module>
         <module>product</module>
+        <module>storefront-bff</module>
     </modules>
 
     <properties>
         <revision>1.0-SNAPSHOT</revision>
-        <!-- release candidate: the GA train for Boot 4.1 is not out yet (decisions.md S2-3) -->
-        <spring-cloud.version>2026.0.0-RC2</spring-cloud.version>
+        <!-- Spring Cloud has no train for Boot 4.1: 2025.1 (GA) targets Boot 4.0, 2026.0 (RC) targets Boot 4.2.
+             Using GA 2025.1.x with the compatibility verifier off in storefront-bff (decisions.md S2-3) -->
+        <spring-cloud.version>2025.1.4</spring-cloud.version>
         <java.version>27</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
