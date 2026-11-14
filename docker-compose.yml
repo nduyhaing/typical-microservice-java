@@ -163,6 +163,24 @@ services:
     networks:
       - shopapp-network
 
+  storefront:
+    build: ./storefront
+    image: shopapp/storefront:dev
+    environment:
+      # server-side rendering calls the BFF on the compose network
+      API_BASE_PATH_SERVER: http://storefront-bff:8087/api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    depends_on:
+      storefront-bff:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   nginx:
     image: nginx:1.30.6
     environment:
