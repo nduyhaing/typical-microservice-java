@@ -194,6 +194,29 @@ services:
     networks:
       - shopapp-network
 
+  order:
+    build: ./order
+    image: shopapp/order:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/order
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # in-network through the nginx alias, like the browser-facing API
+      SHOPAPP_SERVICES_PRODUCT: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/product
+      SHOPAPP_SERVICES_CART: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/cart
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /order/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   redis:
     image: redis:7.4.12-alpine
     healthcheck:
@@ -275,6 +298,8 @@ services:
       cart:
         condition: service_healthy
       customer:
+        condition: service_healthy
+      order:
         condition: service_healthy
       storefront-bff:
         condition: service_healthy
