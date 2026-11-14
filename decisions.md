@@ -73,3 +73,5 @@ a git checkout; expected 4xx logged at ERROR; a service's own `messages.properti
 | 2a-11 | Media lookups in 2a: empty URL when the media id is null, the media URL is not configured, or the media service fails; no retry/circuit breaker until slice 3 | Claude | Media service doesn't exist yet | — |
 | 2a-12 | Product Liquibase context defaults to `default`, never empty: an empty context list makes Liquibase run every changeset, including the sample data | Claude | Found by `LiquibaseSchemaIT` once the seed existed | — |
 | 2a-13 | Healthchecks for Java service containers run `bash -c` with `/dev/tcp` (the JRE image has no curl/wget and its `sh` is dash) | Claude | Container stayed "unhealthy" while the app was up | — |
+| 2a-14 | Storefront toolchain: TypeScript 6.0.3 (TypeScript 7 is the new native compiler; Next.js type-checking relies on the JavaScript compiler API), ESLint 9.39.5 (Next's import/jsx-a11y plugins don't declare ESLint 10 support), Vitest for tests; all versions pinned exactly | Claude | Newest versions that work together | Upgrade when the plugins catch up |
+
