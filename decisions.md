@@ -19,6 +19,7 @@ during implementation (the owner asked for automatic implementation with decisio
 | P9 | Implementation runs automatically; decisions recorded in this file instead of asked | User | Owner's request | Owner reviews decisions after the fact |
 | P10 | Commit directly on `master` (no feature branches) | User | Owner's request | No branch to review or discard as a unit |
 | P11 | Push `master` to GitHub after each commit, automatically | User | Owner's request | Unreviewed work becomes public immediately |
+| P13 | From slice 3 on, each planned task is built by a fresh implementer agent (same rules: TDD, commit + push to `master`, decisions logged here) and checked by the main session, with one fresh review per step | Claude | The remaining slices are large; keeps each task's detail out of one very long session | More agent runs (cost) |
 | P12 | Latest Lombok (1.18.48), MapStruct (1.7.0.Beta2 — a beta; newest final is 1.6.3) and JaCoCo (0.8.16), versions pinned in the parent POM | User | Owner's request | MapStruct beta bugs; fall back to 1.6.3 if one bites |
 
 ## Slice 1 — Foundation (merged)
