@@ -17,6 +17,7 @@ during implementation (the owner asked for automatic implementation with decisio
 | P7 | Commits authored as `nduyhai@gmail.com`, pushed to `github.com/nduyhaing/typical-microservice-java` (public) with the personal gh account; earlier commits rewritten before first push | User | Personal project | — |
 | P8 | YAS mentions removed from README, POM and code; `NOTICE` keeps only the MIT license text legally required for derived files; design docs keep the YAS reference | User + Claude | Owner's request; MIT requires the notice | — |
 | P9 | Implementation runs automatically; decisions recorded in this file instead of asked | User | Owner's request | Owner reviews decisions after the fact |
+| P10 | Commit directly on `master` (no feature branches) | User | Owner's request | No branch to review or discard as a unit |
 
 ## Slice 1 — Foundation (merged)
 
