@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Smoke test for the shop_app foundation (slice 1): checks the definition of done against a running stack.
+# Smoke test for shop_app: checks the definition of done of slice 1 (foundation) and slice 2a (browse)
+# against a running stack.
 #   bash scripts/verify-foundation.sh            # checks the running stack
 #   bash scripts/verify-foundation.sh --restart  # also does `docker compose down && up` and re-checks
 # Needs: docker, curl, python (for JSON). Run from anywhere; works in Git Bash on Windows.
@@ -14,12 +15,12 @@ source .env
 set +a
 
 PORT="${NGINX_HTTP_PORT:-80}"
-HOSTS=(identity api pgadmin kafka)
+HOSTS=(identity api pgadmin kafka storefront)
 BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui product storefront-bff storefront nginx)
 failures=0
 
 pass() { echo "PASS  $1"; }
@@ -48,7 +49,7 @@ check_hosts_resolve() {
     fi
     fail "hostnames do not resolve to 127.0.0.1: ${missing[*]}"
     echo "      add to C:\\Windows\\System32\\drivers\\etc\\hosts (as Administrator):"
-    echo "      127.0.0.1 identity.${DOMAIN} api.${DOMAIN} pgadmin.${DOMAIN} kafka.${DOMAIN}"
+    echo "      127.0.0.1 identity.${DOMAIN} api.${DOMAIN} pgadmin.${DOMAIN} kafka.${DOMAIN} storefront.${DOMAIN}"
     return 1
 }
 
@@ -130,6 +131,33 @@ check_databases() {
     if [ ${#missing[@]} -eq 0 ]; then pass "all ${#EXPECTED_DATABASES[@]} databases exist"; else fail "missing databases: ${missing[*]}"; fi
 }
 
+check_body() {
+    # check_body <name> <url> <expected status> <text that must appear in the body>
+    local name=$1 target=$2 expected=$3 text=$4 response code body
+    response=$(curl -s -w '
+%{http_code}' "$target" || true)
+    code=${response##*$'
+'}
+    body=${response%$'
+'*}
+    if [ "$code" = "$expected" ] && grep -qF -- "$text" <<< "$body"; then
+        pass "$name ($target -> $code)"
+    else
+        fail "$name ($target -> $code, expected $expected containing '$text')"
+    fi
+}
+
+check_storefront() {
+    check_body "storefront home page" "$(url storefront /)" 200 'id="__next"'
+    check_body "featured products through the BFF" "$(url storefront /api/product/storefront/products/featured)" 200         '"name":"Galaxy S24"'
+    check_body "categories through the BFF" "$(url storefront /api/product/storefront/categories)" 200 '"slug":"phones"'
+    check_body "server-rendered product page" "$(url storefront /products/galaxy-s24)" 200 'Galaxy S24'
+    check_body "product page shows the price" "$(url storefront /products/galaxy-s24)" 200 '$799.00'
+    check_http "unknown product page is a 404" "$(url storefront /products/does-not-exist)" 404
+    check_body "unknown product API is a 404 ErrorVm" "$(url storefront /api/product/storefront/product/does-not-exist)" 404         '"statusCode":"404 NOT_FOUND"'
+    check_http "unpublished product is never exposed" "$(url storefront /api/product/storefront/product/prototype-phone)" 404
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -140,6 +168,7 @@ run_checks() {
     check_http "pgAdmin reachable" "$(url pgadmin /misc/ping)" 200
     check_http "API placeholder" "$(url api /)" 404
     check_databases
+    check_storefront
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"
