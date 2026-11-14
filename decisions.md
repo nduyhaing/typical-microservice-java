@@ -110,3 +110,15 @@ Spring's unstyled `/login?error` page; an admin (no CUSTOMER role) sees "Log in 
 count doesn't refresh after "Add to cart"; fast double clicks on +/− can lose a click; the logout redirect carries the
 ID token (`id_token_hint`) in the URL; two simultaneous first adds of the same product can collide (YAS has the same race).
 
+### 2c — Checkout + my orders
+
+| # | Decision | By | Why | Cost if wrong |
+|---|---|---|---|---|
+| 2c-1 | Orders are built from the stored checkout; every price comes from the product service. The browser sends product ids, quantities and an address only — YAS's `OrderPostVm` trusts client totals, prices, tax and discount | Claude | A tampered request must not change what an order costs | — |
+| 2c-2 | Only orderable products can be checked out: published, `isAllowedToOrder`, and not a parent with options (product `GET /products` filters them; closes the deferred 2b item) | Claude | Shoppers can only buy what the shop sells | — |
+| 2c-3 | Shipping address typed in at checkout (saved addresses and country/state lookups come with the location service in slice 3); cash on delivery is the only payment method until slice 5 | Claude | Scope | — |
+| 2c-4 | Order email taken from the access token's `email` claim (YAS asks the customer service) | Claude | Same value, one service call less | Users without an email in Keycloak get orders without email |
+| 2c-5 | After an order is committed, removing its items from the cart is best effort (logged on failure) | Claude | The order is the source of truth; a cart outage must not lose an order | A cart may keep already-ordered items after an outage |
+| 2c-6 | Two shop_app migrations on top of YAS's: order-address location ids nullable (YAS's `bigserial` columns made them mandatory), `order.customer_id` as VARCHAR for Keycloak ids (YAS converted only `checkout.customer_id`) | Claude | YAS schema bugs found by the repository test | — |
+| 2c-7 | Own order view models (`OrderVm` with items and address) instead of YAS's separate get/list shapes | Claude | One shape for confirmation and "My orders" | — |
+

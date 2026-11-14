@@ -10,7 +10,7 @@ The system is built in slices; each ends in something that runs end to end.
 2. Core shopping flow, in three steps:
    - **2a Browse** — product service, storefront-bff, storefront catalog pages *(done)*
    - **2b Log in + cart** — Keycloak login through the BFF (Redis sessions), customer and cart services, cart page *(done)*
-   - 2c Checkout — order service, checkout, "my orders"
+   - **2c Checkout** — order service, checkout with a typed-in address, "My orders" *(done — slice 2 complete)*
 3. Back office: backoffice-bff, backoffice UI, media, inventory, tax, location
 4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
@@ -54,6 +54,9 @@ Notes:
 - **Login**: the storefront's "Log in" goes through storefront-bff to Keycloak. The BFF keeps the tokens in its
   Redis-backed session and relays the access token to the APIs; the browser only has a session cookie.
   Logging out also ends the Keycloak session.
+- **Checkout**: cart → Checkout → shipping address → Place order. Orders are saved as "Pending payment" with
+  server-computed prices; tax, discounts, shipping fees and real payments come in later slices (cash on delivery
+  only for now).
 - **Keycloak volume created before slice 2b?** Run `bash identity/scripts/apply-kc-admin-api-scope.sh` once
   (adds the admin-API audience scope the customer service needs; fresh volumes get it from the realm file).
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
@@ -81,7 +84,7 @@ Notes:
 | **Storefront** | http://storefront.shopapp.local | log in as `customer` / `customer` (or register) |
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
-| Cart / customer APIs | http://api.shopapp.local/cart/..., /customer/... | need a Keycloak access token |
+| Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |
 

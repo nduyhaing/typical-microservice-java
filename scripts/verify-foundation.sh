@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Smoke test for shop_app: checks the definition of done of slice 1 (foundation), 2a (browse) and 2b (login + cart)
-# against a running stack.
+# Smoke test for shop_app: checks the definition of done of slice 1 (foundation) and slice 2 (2a browse,
+# 2b login + cart, 2c checkout + orders) against a running stack.
 #   bash scripts/verify-foundation.sh            # checks the running stack
 #   bash scripts/verify-foundation.sh --restart  # also does `docker compose down && up` and re-checks
 # Needs: docker, curl, python (for JSON). Run from anywhere; works in Git Bash on Windows.
@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer storefront-bff storefront nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order storefront-bff storefront nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -173,6 +173,34 @@ check_storefront() {
     check_http "huge page number is a 400, not a 500"         "$(url storefront '/api/product/storefront/products?pageNo=2147483647')" 400
 }
 
+# Slice 2c, with the logged-in cookie jar and Galaxy S24 Violet (quantity 2) in the cart.
+check_checkout_and_order() {
+    local violet_id=$1 checkout order_id
+    checkout=$(curl -s -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"checkoutItemPostVms\":[{\"productId\":$violet_id,\"quantity\":2}]}"         "$(url storefront /api/order/storefront/checkouts)" || true)
+    if ! grep -q '"totalAmount":1638.0' <<< "$checkout"; then
+        fail "checkout priced by the server (2 x 819.00)"
+        return
+    fi
+    pass "checkout priced by the server (2 x 819.00)"
+    order_id=$(curl -s -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"checkoutId\":\"$(python -c "import json,sys;print(json.load(sys.stdin)['id'])" <<< "$checkout")\",\"paymentMethod\":\"COD\",\"totalPrice\":1,\"shippingAddressPostVm\":{\"contactName\":\"Customer Dev\",\"phone\":\"0123456789\",\"addressLine1\":\"1 Main St\",\"city\":\"Ho Chi Minh City\",\"countryName\":\"Vietnam\"}}"         "$(url storefront /api/order/storefront/orders)"         | python -c "import json,sys;o=json.load(sys.stdin);print(o['id'] if o.get('orderStatus')=='PENDING_PAYMENT' and o.get('totalPrice')==1638.0 else '')" || true)
+    if [ -n "$order_id" ]; then
+        pass "order placed as PENDING_PAYMENT with the server total (client total ignored)"
+    else
+        fail "order placed as PENDING_PAYMENT with the server total"
+        return
+    fi
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /api/order/storefront/orders/my-orders)" | grep -q "\"id\":$order_id,"; then
+        pass "my orders lists order #$order_id"
+    else
+        fail "my orders lists order #$order_id"
+    fi
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /api/cart/storefront/cart/items)" | grep -q "\"productId\":$violet_id,"; then
+        fail "ordered item removed from the cart"
+    else
+        pass "ordered item removed from the cart"
+    fi
+}
+
 check_login_and_cart() {
     local base product_id violet_id
     base=$(url storefront "")
@@ -198,6 +226,7 @@ check_login_and_cart() {
     else
         fail "add Galaxy S24 Violet to the cart and read it back"
     fi
+    check_checkout_and_order "$violet_id"
     curl -s -o /dev/null -b "$COOKIE_JAR" -X DELETE "$(url storefront "/api/cart/storefront/cart/items/$violet_id")" || true
     curl -s -o /dev/null -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" -X POST "$(url storefront /logout)" || true
     if curl -s -b "$COOKIE_JAR" "$(url storefront /authentication)" | grep -q '"isAuthenticated":false'; then
@@ -213,6 +242,7 @@ check_login_and_cart() {
     esac
     check_http "cross-site POST to the BFF is refused" "$(url storefront /logout)" 403 -X POST -H 'Origin: http://evil.example'
     check_http "customer service rejects anonymous calls" "$(url api /customer/storefront/customer/profile)" 401
+    check_http "anonymous checkout is rejected" "$(url storefront /api/order/storefront/checkouts)" 403         -X POST -H 'Content-Type: application/json' -d '{"checkoutItemPostVms":[{"productId":25,"quantity":1}]}' 
 }
 
 run_checks() {
