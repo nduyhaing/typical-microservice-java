@@ -4,6 +4,7 @@ import com.shopapp.product.service.ProductDetailService;
 import com.shopapp.product.service.ProductService;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
+import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
@@ -12,6 +13,7 @@ import com.shopapp.product.viewmodel.product.ProductsGetVm;
 import com.shopapp.product.viewmodel.productoption.ProductOptionCombinationGetVm;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -64,6 +66,17 @@ public class ProductController {
     public ResponseEntity<List<ProductThumbnailGetVm>> getFeaturedProductsById(
         @RequestParam("productId") List<Long> productIds) {
         return ResponseEntity.ok(productService.getFeaturedProductsById(productIds));
+    }
+
+    /** YAS: price lookup for the order service at checkout. Authenticated (not under /storefront). */
+    @GetMapping("/products")
+    public ResponseEntity<ProductGetCheckoutListVm> getProductCheckoutList(
+        @RequestParam(value = "pageNo", defaultValue = "0", required = false)
+        @Min(0) @Max(MAX_PAGE_NO) int pageNo,
+        @RequestParam(value = "pageSize", defaultValue = "20", required = false)
+        @Min(1) @Max(MAX_PAGE_SIZE) int pageSize,
+        @RequestParam(value = "ids") @Size(max = 100) List<Long> productIds) {
+        return ResponseEntity.ok(productService.getProductCheckoutList(pageNo, pageSize, productIds));
     }
 
     @GetMapping("/storefront/category/{categorySlug}/products")

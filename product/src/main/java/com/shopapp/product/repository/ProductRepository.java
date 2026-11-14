@@ -25,6 +25,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Optional<Product> findByIdAndIsPublishedTrue(Long id);
 
+    /**
+     * Products that can be put in an order (decisions.md 2c-2): published, allowed to order, and not a parent with
+     * options (only its variations can be bought).
+     */
+    @Query("SELECT p FROM Product p WHERE p.id IN :productIds AND p.isPublished = TRUE "
+        + "AND p.isAllowedToOrder = TRUE AND p.hasOptions = FALSE ORDER BY p.id ASC")
+    Page<Product> findOrderableByIds(@Param("productIds") List<Long> productIds, Pageable pageable);
+
     Optional<Product> findByGtinAndIsPublishedTrue(String gtin);
 
     Optional<Product> findBySkuAndIsPublishedTrue(String sku);

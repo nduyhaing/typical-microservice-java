@@ -12,7 +12,9 @@ import com.shopapp.product.repository.ProductCategoryRepository;
 import com.shopapp.product.repository.ProductRelatedRepository;
 import com.shopapp.product.repository.ProductRepository;
 import com.shopapp.product.utils.Constants;
+import com.shopapp.product.viewmodel.product.ProductCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
+import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
@@ -77,6 +79,14 @@ public class ProductService {
             .filter(Product::isPublished)
             .map(this::toThumbnailGetVm)
             .toList();
+    }
+
+    /** YAS GET /products: the order service's price lookup at checkout, orderable products only. */
+    public ProductGetCheckoutListVm getProductCheckoutList(int pageNo, int pageSize, List<Long> productIds) {
+        Page<Product> page = productRepository.findOrderableByIds(productIds, PageRequest.of(pageNo, pageSize));
+        return new ProductGetCheckoutListVm(
+            page.map(product -> ProductCheckoutListVm.fromModel(product, thumbnailUrl(product))).getContent(),
+            page.getNumber(), page.getSize(), (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
     public ProductsGetVm getRelatedProductsStorefront(Long id, int pageNo, int pageSize) {
