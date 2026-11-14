@@ -194,6 +194,18 @@ services:
     networks:
       - shopapp-network
 
+  redis:
+    image: redis:7.4.12-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - redis-data:/data
+    networks:
+      - shopapp-network
+
   storefront-bff:
     build: ./storefront-bff
     image: shopapp/storefront-bff:dev
@@ -201,12 +213,22 @@ services:
       # in-network: api.${DOMAIN} is an nginx alias; same port as the host uses
       API_BASE_URL: http://api.${DOMAIN}:${NGINX_HTTP_PORT}
       STOREFRONT_URL: http://storefront:3000
+      # login: browser-facing Keycloak URL (token issuer) + direct back-channel URL (decisions.md 2b-6)
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      KEYCLOAK_INTERNAL_URL: http://identity:8080
+      STOREFRONT_BFF_CLIENT_SECRET: ${STOREFRONT_BFF_CLIENT_SECRET}
+      REDIS_HOST: redis
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8087 && printf 'GET /actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
       interval: 10s
       timeout: 5s
       retries: 30
       start_period: 20s
+    depends_on:
+      redis:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
     networks:
       - shopapp-network
 
@@ -270,3 +292,4 @@ volumes:
   postgres-data:
   pgadmin-data:
   kafka-data:
+  redis-data:

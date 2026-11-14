@@ -1,5 +1,7 @@
 server:
   port: 8087
+  # behind nginx: build redirect URLs from X-Forwarded-* (http://storefront.shopapp.local/...)
+  forward-headers-strategy: framework
 
 spring:
   application:
@@ -7,6 +9,10 @@ spring:
   threads:
     virtual:
       enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
   cloud:
     # Spring Cloud 2025.1 declares Boot 4.0 only; we run it on Boot 4.1 (decisions.md S2-3).
     # The gateway tests prove the routes work; re-enable when moving to Boot 4.2 + Spring Cloud 2026.0 GA.
@@ -18,19 +24,32 @@ spring:
           httpclient:
             connect-timeout: 2000
             response-timeout: 10s
+          default-filters:
+            - SaveSession
           routes:
-            # /api/product/... -> api gateway (nginx) /product/...
+            # /api/product/... -> api gateway (nginx) /product/..., with the user's access token when logged in
             - id: api
               uri: ${API_BASE_URL:http://api.shopapp.local}
               predicates:
                 - Path=/api/**
               filters:
+                - TokenRelay=
                 - StripPrefix=1
             # everything else -> the Next.js storefront
             - id: storefront
               uri: ${STOREFRONT_URL:http://storefront:3000}
               predicates:
                 - Path=/**
+
+shopapp:
+  keycloak:
+    # what the browser uses (login page, logout) and the token issuer
+    public-url: ${KEYCLOAK_URL:http://identity.shopapp.local}
+    # server-to-server (token, keys, user info); in docker compose straight to Keycloak
+    internal-url: ${KEYCLOAK_INTERNAL_URL:${KEYCLOAK_URL:http://identity.shopapp.local}}
+    realm: shopapp
+    client-id: storefront-bff
+    client-secret: ${STOREFRONT_BFF_CLIENT_SECRET:}
 
 management:
   endpoints:

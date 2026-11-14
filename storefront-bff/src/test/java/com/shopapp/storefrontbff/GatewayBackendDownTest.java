@@ -20,6 +20,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient(timeout = "10s")
+@org.springframework.context.annotation.Import(RedisContainerSupport.class)
 class GatewayBackendDownTest {
 
     @Autowired

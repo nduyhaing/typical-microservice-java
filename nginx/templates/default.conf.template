@@ -1,5 +1,9 @@
 # Rendered by the nginx image at startup: ${DOMAIN} and ${NGINX_HTTP_PORT} come from the environment (.env).
 
+# Look containers up through Docker's DNS on each request (cached 10 s) instead of once at startup, so a rebuilt
+# container (new IP) keeps working without restarting nginx (decisions.md 2b-8). Upstreams are variables for this.
+resolver 127.0.0.11 valid=10s ipv6=off;
+
 proxy_buffer_size 128k;
 proxy_buffers 4 256k;
 proxy_busy_buffers_size 256k;
@@ -20,7 +24,8 @@ server {
     server_name identity.${DOMAIN};
 
     location / {
-        proxy_pass http://identity:8080;
+        set $upstream_identity identity:8080;
+        proxy_pass http://$upstream_identity;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -34,21 +39,24 @@ server {
     server_name api.${DOMAIN};
 
     location /product/ {
-        proxy_pass http://product:8080;
+        set $upstream_product product:8080;
+        proxy_pass http://$upstream_product;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
     location /cart/ {
-        proxy_pass http://cart:8080;
+        set $upstream_cart cart:8080;
+        proxy_pass http://$upstream_cart;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
     location /customer/ {
-        proxy_pass http://customer:8080;
+        set $upstream_customer customer:8080;
+        proxy_pass http://$upstream_customer;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
@@ -66,7 +74,8 @@ server {
     server_name pgadmin.${DOMAIN};
 
     location / {
-        proxy_pass http://pgadmin:80;
+        set $upstream_pgadmin pgadmin:80;
+        proxy_pass http://$upstream_pgadmin;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
@@ -78,7 +87,8 @@ server {
     server_name kafka.${DOMAIN};
 
     location / {
-        proxy_pass http://kafka-ui:8080;
+        set $upstream_kafka_ui kafka-ui:8080;
+        proxy_pass http://$upstream_kafka_ui;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
@@ -90,7 +100,8 @@ server {
     server_name storefront.${DOMAIN};
 
     location / {
-        proxy_pass http://storefront-bff:8087;
+        set $upstream_storefront_bff storefront-bff:8087;
+        proxy_pass http://$upstream_storefront_bff;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

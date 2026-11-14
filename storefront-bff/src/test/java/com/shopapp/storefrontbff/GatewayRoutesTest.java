@@ -19,6 +19,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureWebTestClient
+@org.springframework.context.annotation.Import(RedisContainerSupport.class)
 class GatewayRoutesTest {
 
     private static final AtomicReference<String> API_PATH = new AtomicReference<>();
