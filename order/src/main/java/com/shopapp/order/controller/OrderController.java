@@ -1,0 +1,36 @@
+package com.shopapp.order.controller;
+
+import com.shopapp.order.service.OrderService;
+import com.shopapp.order.viewmodel.order.OrderPostVm;
+import com.shopapp.order.viewmodel.order.OrderVm;
+import jakarta.validation.Valid;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequiredArgsConstructor
+public class OrderController {
+
+    private final OrderService orderService;
+
+    @PostMapping("/storefront/orders")
+    public ResponseEntity<OrderVm> createOrder(@Valid @RequestBody OrderPostVm orderPostVm) {
+        return ResponseEntity.ok(orderService.createOrder(orderPostVm));
+    }
+
+    @GetMapping("/storefront/orders/my-orders")
+    public ResponseEntity<List<OrderVm>> getMyOrders() {
+        return ResponseEntity.ok(orderService.getMyOrders());
+    }
+
+    @GetMapping("/storefront/orders/checkout/{id}")
+    public ResponseEntity<OrderVm> getOrderByCheckoutId(@PathVariable String id) {
+        return ResponseEntity.ok(orderService.getOrderByCheckoutId(id));
+    }
+}

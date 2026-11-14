@@ -12,6 +12,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
 
+    List<Order> findAllByCustomerIdOrderByCreatedOnDescIdDesc(String customerId);
+
     Optional<Order> findByCheckoutId(String checkoutId);
 
     @Query("SELECT o FROM Order o ORDER BY o.createdOn DESC")
