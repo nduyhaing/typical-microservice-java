@@ -30,6 +30,7 @@
         <module>tax</module>
         <module>inventory</module>
         <module>promotion</module>
+        <module>rating</module>
     </modules>
 
     <properties>

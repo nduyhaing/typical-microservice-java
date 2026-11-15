@@ -412,6 +412,30 @@ services:
     networks:
       - shopapp-network
 
+  rating:
+    build: ./rating
+    image: shopapp/rating:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/rating
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # "did the customer buy it?" with the customer's token, and the product name, straight to the containers
+      # (decisions.md 4-31, 4-35)
+      SHOPAPP_SERVICES_ORDER: http://order:8080/order
+      SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /rating/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   redis:
     image: redis:7.4.12-alpine
     healthcheck:
@@ -546,6 +570,8 @@ services:
       inventory:
         condition: service_healthy
       promotion:
+        condition: service_healthy
+      rating:
         condition: service_healthy
       storefront-bff:
         condition: service_healthy
