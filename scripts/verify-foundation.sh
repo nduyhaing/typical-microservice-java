@@ -15,18 +15,21 @@ source .env
 set +a
 
 PORT="${NGINX_HTTP_PORT:-80}"
-HOSTS=(identity api pgadmin kafka storefront)
+HOSTS=(identity api pgadmin kafka storefront backoffice)
 BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order storefront-bff storefront nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
 source scripts/lib/storefront-login.sh
+# shellcheck source=lib/backoffice-login.sh
+source scripts/lib/backoffice-login.sh
 COOKIE_JAR=$(mktemp)
-trap 'rm -f "$COOKIE_JAR"' EXIT
+ADMIN_JAR=$(mktemp)
+trap 'rm -f "$COOKIE_JAR" "$ADMIN_JAR"' EXIT
 
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; failures=$((failures + 1)); }
@@ -139,10 +142,11 @@ check_databases() {
 }
 
 check_body() {
-    # check_body <name> <url> <expected status> <text that must appear in the body>
+    # check_body <name> <url> <expected status> <text that must appear in the body> [extra curl args...]
     local name=$1 target=$2 expected=$3 text=$4 response code body
+    shift 4
     response=$(curl -s -w '
-%{http_code}' "$target" || true)
+%{http_code}' "$@" "$target" || true)
     code=${response##*$'
 '}
     body=${response%$'
@@ -245,6 +249,34 @@ check_login_and_cart() {
     check_http "anonymous checkout is rejected" "$(url storefront /api/order/storefront/checkouts)" 403         -X POST -H 'Content-Type: application/json' -d '{"checkoutItemPostVms":[{"productId":25,"quantity":1}]}' 
 }
 
+# Slice 3a: back office (ADMIN only) and catalog admin through backoffice-bff.
+check_backoffice() {
+    local base origin brand_id status
+    base=$(url backoffice "")
+    origin="http://backoffice.${DOMAIN}${BASE_URL_SUFFIX}"
+    check_http "back office needs a login" "$(url backoffice /)" 302
+    if ! backoffice_login "$ADMIN_JAR" "$base" admin admin; then
+        fail "admin login to the back office"
+        return
+    fi
+    pass "admin login to the back office"
+    check_body "back office brands page" "$(url backoffice /catalog/brands)" 200 'Brands' -b "$ADMIN_JAR"
+    curl -s -o /dev/null -b "$ADMIN_JAR" -H "Origin: $origin" -H 'Content-Type: application/json'         -d '{"name":"Smoke Brand","slug":"smoke-brand","isPublish":true}'         "$(url backoffice /api/product/backoffice/brands)" || true
+    brand_id=$(curl -s -b "$ADMIN_JAR" "$(url backoffice '/api/product/backoffice/brands?brandName=smoke')"         | python -c "import json,sys;b=[x for x in json.load(sys.stdin) if x['slug']=='smoke-brand'];print(b[0]['id'] if b else '')" || true)
+    if [ -n "$brand_id" ]; then
+        pass "admin creates a brand and sees it in the list"
+    else
+        fail "admin creates a brand and sees it in the list"
+        return
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X DELETE         "$(url backoffice "/api/product/backoffice/brands/$brand_id")" || true)
+    if [ "$status" = "204" ]; then pass "admin deletes the brand"; else fail "admin deletes the brand -> $status"; fi
+    backoffice_login "$COOKIE_JAR" "$base" customer customer || true
+    status=$(backoffice_auth_status "$COOKIE_JAR" "$base" || true)
+    if [ "$status" = "403" ]; then pass "a customer is refused by the back office (403)"; else fail "customer in back office -> $status"; fi
+    check_http "customer token cannot use admin endpoints" "$(url api /product/backoffice/brands)" 401
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -257,6 +289,7 @@ run_checks() {
     check_databases
     check_storefront
     check_login_and_cart
+    check_backoffice
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

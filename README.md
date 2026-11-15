@@ -11,7 +11,10 @@ The system is built in slices; each ends in something that runs end to end.
    - **2a Browse** — product service, storefront-bff, storefront catalog pages *(done)*
    - **2b Log in + cart** — Keycloak login through the BFF (Redis sessions), customer and cart services, cart page *(done)*
    - **2c Checkout** — order service, checkout with a typed-in address, "My orders" *(done — slice 2 complete)*
-3. Back office: backoffice-bff, backoffice UI, media, inventory, tax, location
+3. Back office, in three steps:
+   - **3a Back office + catalog admin** — backoffice-bff (ADMIN only), back office app, brands/categories/products admin *(done)*
+   - 3b Media — image upload, product images
+   - 3c Inventory, tax, location — stock, tax rates, saved addresses at checkout
 4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
 6. Operations: observability (OTel, Prometheus, Grafana, Loki, Tempo), Kubernetes, CI
@@ -29,7 +32,7 @@ Designs and plans live in `docs/superpowers/`.
   (or `/etc/hosts` on macOS/Linux):
 
   ```
-  127.0.0.1 identity.shopapp.local api.shopapp.local pgadmin.shopapp.local kafka.shopapp.local storefront.shopapp.local
+  127.0.0.1 identity.shopapp.local api.shopapp.local pgadmin.shopapp.local kafka.shopapp.local storefront.shopapp.local backoffice.shopapp.local
   ```
 
 ## Run it
@@ -82,6 +85,7 @@ Notes:
 | pgAdmin | http://pgadmin.shopapp.local | no login (desktop mode); server password `admin` |
 | Kafka UI | http://kafka.shopapp.local | — |
 | **Storefront** | http://storefront.shopapp.local | log in as `customer` / `customer` (or register) |
+| **Back office** | http://backoffice.shopapp.local | `admin` / `admin` (ADMIN role only; customers get 403) |
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
 | Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
