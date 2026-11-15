@@ -17,6 +17,7 @@ public final class Constants {
         public static final String PAYPAL_UNAVAILABLE = "PAYPAL_UNAVAILABLE";
         public static final String PAYPAL_NOT_CONFIGURED = "PAYPAL_NOT_CONFIGURED";
         public static final String PAYMENT_NOT_RECORDED = "PAYMENT_NOT_RECORDED";
+        public static final String PAYMENT_REPLACED = "PAYMENT_REPLACED";
 
         private ErrorCode() {
         }

@@ -24,7 +24,9 @@ The system is built in slices; each ends in something that runs end to end.
    - **3c Inventory, tax, location** — stock, tax rates, saved addresses at checkout *(done — slice 3 complete)*
 4. **Events & search** — Debezium CDC → Kafka, search (Elasticsearch) with a storefront search page, reviews (rating),
    coupons (promotion) at checkout *(done — slice 4 complete)*
-5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
+5. **Payments & the rest** — order lifecycle (admin statuses, delivery status, customer cancel with stock and
+   coupon given back), payment (cash on delivery, PayPal sandbox), webhooks, recommendation (similar products),
+   sample data *(done — slice 5 complete)*
 6. **Operations** — observability (OpenTelemetry → Prometheus, Loki, Tempo, Grafana; compose add-on), Kubernetes
    (Helm charts, kind), CI (GitHub Actions, GHCR images, CodeQL, secret scan, Dependabot) *(done — slice 6 complete)*
 
@@ -245,8 +247,10 @@ dbproduct.public.product --consumer group "recommendation"--> recommendation --p
   <categories>` (HTML removed). Attribute values and the specification are left out: with them a laptop came second
   for a phone ("Screen size: ..." matched). Only published, individually visible products are stored as
   recommendable (variations never are).
-- **Resources**: 520–745 MiB RAM (`docker stats`; JVM heap 320 MB, ONNX Runtime native memory on top), image
-  944 MB, model volume 87 MB. Stop it if memory is tight: the product page simply has no similar products.
+- **Resources**: compose caps the container at `mem_limit: 900m` and ONNX Runtime at 2 intra-op threads
+  (`RECOMMENDATION_ONNX_THREADS`; its default is one per host core). JVM heap 320 MB, ONNX Runtime native memory on
+  top (measured in `decisions.md` 5-71), image 944 MB, model volume 87 MB. Stop it if memory is tight: the product
+  page simply has no similar products.
 - **Endpoint** (public): `GET http://api.shopapp.local/recommendation/embedding/product/{id}/similarity` → up to 8
   `{id, name, slug, price, brandName, thumbnailUrl}`, nearest first, without the product itself; `[]` for an
   unknown or unpublished product. `POST /recommendation/backoffice/reindex` (ADMIN) re-embeds every product.
@@ -257,6 +261,28 @@ dbproduct.public.product --consumer group "recommendation"--> recommendation --p
 - **Down?** The storefront waits at most 1.5 s and hides the section; nginx does not wait for the service.
 - **Postgres image**: `pgvector/pgvector:0.8.7-pg16-trixie` (PostgreSQL 16.16 on the same Debian as
   `postgres:16.16`, plus the `vector` extension); the existing `postgres-data` volume works unchanged.
+
+## Order lifecycle
+
+Orders move through one status machine (order service, `decisions.md` 5-1..5-9): PENDING → PENDING_PAYMENT →
+ACCEPTED (cash on delivery accepted) / PAID → SHIPPING → COMPLETED, or CANCELLED / REJECT / REFUND. Anything else is
+a 400.
+
+- **Back office** *Sales → Orders*: filters, detail, status change (with delivery status and method).
+- **Customer cancel**: "Cancel order" on My orders while the order is PENDING or PENDING_PAYMENT and no PayPal capture
+  is running (5-62).
+- **Stock and coupon come back** when an unshipped order is cancelled, rejected or refunded: product restores the
+  units and promotion releases the coupon use, each exactly once, called with the order service's own token. If
+  product or promotion is down, a sweep retries every 5 minutes (the least recently tried first, with a back-off per
+  order, 5-65).
+
+## Sample data
+
+Back office dashboard card **Sample data** (`POST /sampledata/backoffice/sampledata`, ADMIN) restores the sample
+catalog (brands, categories, products, options, attributes; `decisions.md` 5-50..5-54): rows that are missing are inserted again and
+deleted (unpublished) sample products are published again (as a new version, so search and recommendation pick them
+up, 5-70). Loading twice inserts nothing the second time. It never touches orders, customers or carts and runs with
+its own Postgres login that can only read and insert catalog rows.
 
 ## Webhooks
 
@@ -269,13 +295,19 @@ dbproduct.public.product / dborder.public.order --group "webhook"--> webhook --l
 ```
 
 - **Delivery**: `POST` with `Content-Type: application/json`, body `{"deliveryId","event","createdAt","data"}` and
-  headers `X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of the raw body with the webhook's secret>`,
-  `X-Shopapp-Delivery`, `X-Shopapp-Event`, `X-Shopapp-Timestamp`. Verify on the receiver, e.g. in Python:
-  `hmac.compare_digest(sig, "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest())`.
+  headers `X-Shopapp-Delivery`, `X-Shopapp-Event`, `X-Shopapp-Timestamp` (Unix seconds) and
+  `X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of timestamp + "." + raw body, keyed with the webhook's secret>`
+  (`decisions.md` 5-69). Verify on the receiver — the signature, then that the timestamp is recent (e.g. 5 minutes),
+  so a captured delivery cannot be replayed later — e.g. in Python:
+  `hmac.compare_digest(sig, "sha256=" + hmac.new(secret, ts.encode() + b"." + body, hashlib.sha256).hexdigest())
+  and abs(time.time() - int(ts)) < 300`.
 - **Retries**: 3 attempts (after 10 s, then 60 s) for 5xx, 408, 429, timeouts and connection errors; other answers
-  and redirects are not retried. Every attempt is in the delivery log (`GET /webhook/backoffice/webhooks/{id}/notifications`).
+  and redirects are not retried. A CDC event is queued once per database change (Debezium LSN + transaction +
+  table + row, 5-64): re-read events are not sent twice, and events after a topic reset are not mistaken for old
+  ones. Every attempt is in the delivery log (`GET /webhook/backoffice/webhooks/{id}/notifications`).
 - **SSRF guard**: only http(s) URLs whose host resolves to public addresses are accepted, at registration and again
-  at send time (the checked address is the one connected to). Hosts in `WEBHOOK_ALLOWED_HOSTS` (compose default:
+  at send time (the checked address is the one connected to); IPv6 forms that embed an IPv4 address (mapped, SIIT,
+  NAT64, 6to4) are judged by that IPv4 address. Hosts in `WEBHOOK_ALLOWED_HOSTS` (compose default:
   `webhook-receiver`) are exempt — local testing only.
 - **Test receiver**: `webhook-receiver` logs every request (headers and body) as one JSON line:
   register `http://webhook-receiver:8080/anything`, then `docker compose logs -f webhook-receiver`.
@@ -302,8 +334,24 @@ PayPal --redirect ?token=--> /checkout/payment-return --POST /payment/capture-->
   provider is hidden and its endpoints answer 503. To try it, create a sandbox REST app at developer.paypal.com, put
   its client id and secret in `.env` and `docker compose up -d payment-paypal`. The capture is verified server-side
   (USD, the exact order total, our reference) before the order is marked paid; a replayed return page never pays twice.
-- payment-paypal is internal only (nginx and the BFFs refuse `/payment-paypal/`). The payment service has its own
-  Keycloak client `payment-service` (realm role SERVICE); on a Keycloak volume created before slice 5 run
+  Each payment sends its own random `PayPal-Request-Id` when creating its PayPal order; a capture PayPal reports as
+  already captured is read back from PayPal and verified like any other. Cancelling at PayPal is a `POST
+  /payment/cancel {token}`.
+- **One payment step at a time per order** (5-60): starting a payment, capturing and confirming cash are serialised
+  per order, so a capture and a new "pay on delivery" (or two captures, or two starts) can never overwrite each other;
+  an order with a completed payment takes no other.
+- **Capture in progress** (5-62): just before capturing at PayPal the payment service marks the order "payment in
+  progress" for 5 minutes; meanwhile neither the customer nor an admin can cancel or reject it.
+- **Order down after the capture** (5-61): the money is kept as a completed payment and the payment service retries
+  telling the order every minute (30 s back-off, doubling to an hour, 20 payments per run). If the order refuses it
+  (e.g. cancelled after the marker expired), the retries stop. **Sales → Payments** highlights these payments
+  ("Needs attention", filter "Needs attention only") together with captures that failed verification: refund them in
+  the PayPal dashboard (no refunds through the API yet).
+- payment-paypal is internal only (nginx and the BFFs refuse `/payment-paypal/`). Services call each other's
+  `/internal/` endpoints with their own Keycloak client and **per-capability realm roles** (5-66): `payment-service`
+  has `SERVICE_ORDER_READ`, `SERVICE_ORDER_PAYMENT`, `SERVICE_PAYPAL`; `order-service` has `SERVICE_GOODS_BACK`
+  (give stock and coupon use back); neither has the default customer roles. On a Keycloak volume created before this
+  change run `bash identity/scripts/apply-service-client.sh` and
   `bash identity/scripts/apply-service-client.sh payment-service PAYMENT_SERVICE_CLIENT_SECRET` once.
 - Back office: **Sales → Payment providers** (enable, disable, rename; "Not configured" for PayPal without credentials).
 
@@ -311,9 +359,9 @@ PayPal --redirect ?token=--> /checkout/payment-return --POST /payment/capture-->
 
 Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).
 
-- **Who can review**: a logged-in customer who has **ordered** the product (or one of its variations). Until payment
-  exists (slice 5) any order that is not cancelled, rejected or refunded counts. Others get "Only customers who
-  bought this product can review it" (400). Admin accounts cannot post reviews.
+- **Who can review**: a logged-in customer who has **bought** the product (or one of its variations): an order that
+  is PAID, SHIPPING or COMPLETED (`decisions.md` 5-3). Others get "Only customers who bought this product can review
+  it" (400). Admin accounts cannot post reviews.
 - **One review per customer and product** (also enforced by the database; a second one is a 409 "You have already
   reviewed this product"). There is no edit: delete your own review (`DELETE /rating/storefront/ratings/{id}`) and
   write a new one. Product and customer names are copied when the review is written.
@@ -343,8 +391,8 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
   `PROMOTION_NOT_APPLICABLE`, `MINIMUM_ORDER_NOT_REACHED`.
 - **Deactivate instead of delete**: a coupon that has been used can't be deleted (orders refer to it); clear its
   *Active* flag instead. Unused coupons can be deleted.
-- Not yet: cancelling an order does not give the use back (no cancel flow before slice 5); "My orders" shows the
-  total without a separate discount line.
+- Cancelling, rejecting or refunding an order before it ships gives its coupon use back (once; see Order lifecycle).
+  "My orders" shows the total without a separate discount line.
 
 ## Observability
 

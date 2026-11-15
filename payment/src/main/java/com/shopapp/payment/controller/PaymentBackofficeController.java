@@ -28,9 +28,10 @@ public class PaymentBackofficeController {
         @RequestParam(required = false) @Positive Long orderId,
         @RequestParam(required = false) PaymentStatus paymentStatus,
         @RequestParam(required = false) PaymentMethod paymentMethod,
+        @RequestParam(defaultValue = "false") boolean needsAttention,
         @RequestParam(defaultValue = "0") @Min(0) @Max(Constants.MAX_PAGE_NO) int pageNo,
         @RequestParam(defaultValue = "10") @Min(1) @Max(Constants.MAX_PAGE_SIZE) int pageSize) {
-        return paymentService.getPayments(orderId, paymentStatus, paymentMethod, pageNo, pageSize);
+        return paymentService.getPayments(orderId, paymentStatus, paymentMethod, needsAttention, pageNo, pageSize);
     }
 
     /** Cash collected on delivery: the order is marked paid with the recorded amount. */

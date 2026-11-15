@@ -23,16 +23,28 @@ import {
 } from '../../../modules/payment/models/Payment';
 import { confirmCodPayment, getPayments } from '../../../modules/payment/services/PaymentService';
 
-const NO_FILTER: PaymentFilter = { orderId: '', paymentStatus: '', paymentMethod: '' };
+const NO_FILTER: PaymentFilter = { orderId: '', paymentStatus: '', paymentMethod: '', needsAttention: false };
 
 function statusBg(status: PaymentStatus): string {
   return status === 'COMPLETED' ? 'success' : status === 'CANCELLED' ? 'secondary' : 'warning';
 }
 
+/** Why a payment needs a person (decisions.md 5-61, 5-63). */
+function attentionText(payment: Payment): string {
+  if (payment.orderRefused) {
+    return 'Captured but refused by the order, refund by hand';
+  }
+  if (payment.paymentStatus === 'COMPLETED') {
+    return 'Captured, order not updated yet, retried automatically';
+  }
+  return 'Captured but not accepted, refund by hand';
+}
+
 /**
  * Payments (shop_app addition; YAS had no payments page): filter by order, status and method. A pending
  * cash-on-delivery payment is confirmed here when the cash was collected, which marks the order paid
- * (decisions.md 5-15, 5-19).
+ * (decisions.md 5-15, 5-19). Money captured at PayPal that the order did not accept (yet) is highlighted and can be
+ * filtered on (5-63).
  */
 export default function PaymentsPage() {
   const [pageNo, setPageNo] = useState(0);
@@ -107,6 +119,14 @@ export default function PaymentsPage() {
               ))}
             </Form.Select>
           </Form.Group>
+          <Form.Group as={Col} md={2} controlId="payment-filter-attention">
+            <Form.Check
+              type="checkbox"
+              label="Needs attention only"
+              checked={draft.needsAttention}
+              onChange={(e) => setDraft({ ...draft, needsAttention: e.target.checked })}
+            />
+          </Form.Group>
           <Col md={2}>
             <Button type="submit" variant="outline-primary">
               Search
@@ -136,7 +156,7 @@ export default function PaymentsPage() {
             {data.payments
               .map((listed) => changed[listed.id] ?? listed)
               .map((payment) => (
-                <tr key={payment.id}>
+                <tr key={payment.id} className={payment.needsAttention ? 'table-danger' : undefined}>
                   <td>{payment.id}</td>
                   <td>
                     <Link href={`/sales/orders/${payment.orderId}`}>#{payment.orderId}</Link>
@@ -148,8 +168,13 @@ export default function PaymentsPage() {
                     <Badge bg={statusBg(payment.paymentStatus)}>
                       {PAYMENT_STATUS_LABELS[payment.paymentStatus] ?? payment.paymentStatus}
                     </Badge>
-                    {payment.paymentStatus === 'COMPLETED' && !payment.orderConfirmed && (
-                      <div className="small text-danger">Order not updated yet</div>
+                    {payment.needsAttention && (
+                      <div className="small text-danger">
+                        <Badge bg="danger" className="me-1">
+                          Needs attention
+                        </Badge>
+                        {attentionText(payment)}
+                      </div>
                     )}
                     {payment.failureMessage && <div className="small text-muted">{payment.failureMessage}</div>}
                   </td>

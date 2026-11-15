@@ -51,7 +51,8 @@ class SampleCatalogScriptTest {
             """);
 
         assertThat(script.statements().get(0).restoreSql()).isEqualTo(
-            "update product set is_published = true where slug = 'galaxy-s24' and is_published is distinct from true");
+            "update product set is_published = true, last_modified_on = now() where slug = 'galaxy-s24'"
+                + " and is_published is distinct from true");
         assertThat(script.statements().get(1).restoreSql()).isNull();
     }
 

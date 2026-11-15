@@ -8,7 +8,8 @@ import java.net.InetAddress;
  * 0/8 (incl. 0.0.0.0), loopback, RFC 1918 private, link-local (incl. the 169.254.169.254 metadata service), CGNAT
  * 100.64/10, IETF/test/benchmark ranges, multicast, reserved and broadcast; for IPv6 the unspecified and loopback
  * addresses, unique-local fc00::/7, link- and site-local, multicast, documentation, discard, Teredo, and every
- * form that embeds an IPv4 address (mapped, compatible, NAT64, 6to4) unless that IPv4 address is public.
+ * form that embeds an IPv4 address (mapped, compatible, SIIT, NAT64 incl. local-use 64:ff9b:1::/48, 6to4) unless
+ * that IPv4 address is public.
  */
 final class AddressPolicy {
 
@@ -49,8 +50,16 @@ final class AddressPolicy {
         if (allZero(b, 0, 12)) {
             return false;                                         // ::, ::1, ::a.b.c.d compatible
         }
+        if (allZero(b, 0, 8) && (b[8] & 0xff) == 0xff && (b[9] & 0xff) == 0xff && allZero(b, 10, 12)) {
+            return isPublicV4(b, 12);                             // ::ffff:0:a.b.c.d SIIT (5-69)
+        }
         if (b[0] == 0 && b[1] == 0x64 && (b[2] & 0xff) == 0xff && (b[3] & 0xff) == 0x9b && allZero(b, 4, 12)) {
             return isPublicV4(b, 12);                             // 64:ff9b::/96 NAT64
+        }
+        if (b[0] == 0 && b[1] == 0x64 && (b[2] & 0xff) == 0xff && (b[3] & 0xff) == 0x9b && b[4] == 0 && b[5] == 1) {
+            // 64:ff9b:1::/48 local-use NAT64 (RFC 8215): the operator picks the prefix length, so only the /96 form
+            // with a public IPv4 address is allowed; any other form is refused (5-69)
+            return allZero(b, 6, 12) && isPublicV4(b, 12);
         }
         if (b[0] == 0x20 && b[1] == 0x02) {
             return isPublicV4(b, 2);                              // 2002::/16 6to4

@@ -17,7 +17,8 @@ public class EmbeddingConfig {
 
     @Bean
     public EmbeddingModel embeddingModel(EmbeddingProperties properties) {
-        TransformersEmbeddingModel model = new TransformersEmbeddingModel();
+        TransformersEmbeddingModel model = new ThreadCappedEmbeddingModel(
+            properties.intraOpThreads() == null ? 0 : properties.intraOpThreads());
         model.setModelResource(properties.modelUrl());
         model.setTokenizerResource(properties.tokenizerUrl());
         model.setResourceCacheDirectory(properties.cacheDirectory());

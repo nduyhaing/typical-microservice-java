@@ -29,6 +29,9 @@ final class PaypalStub {
     static final List<Call> TOKEN_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> CREATE_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> CAPTURE_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> GET_CALLS = new CopyOnWriteArrayList<>();
+    /** Answer of show order (GET); null = the order with a completed capture of 12.34 USD. */
+    static final AtomicReference<Answer> GET_ANSWER = new AtomicReference<>();
     /** How many tokens were handed out: token N is "paypal-token-N". */
     static final AtomicInteger TOKENS_ISSUED = new AtomicInteger();
     /** Answer of create order; null = a normal created order with an approval link. */
@@ -51,6 +54,8 @@ final class PaypalStub {
         TOKEN_CALLS.clear();
         CREATE_CALLS.clear();
         CAPTURE_CALLS.clear();
+        GET_CALLS.clear();
+        GET_ANSWER.set(null);
         CREATE_ANSWER.set(null);
         CAPTURE_ANSWER.set(null);
         CREATE_UNAUTHORIZED.set(0);
@@ -78,6 +83,17 @@ final class PaypalStub {
             server.createContext("/v2/checkout/orders", exchange -> {
                 Call call = record(exchange);
                 String path = call.path();
+                if ("GET".equals(call.method())) {
+                    GET_CALLS.add(call);
+                    String id = path.substring("/v2/checkout/orders/".length());
+                    Answer answer = GET_ANSWER.get();
+                    if (answer == null) {
+                        respond(exchange, 200, completedCapture(id, "12.34", "USD", "payment-7"));
+                    } else {
+                        respond(exchange, answer.status(), answer.body());
+                    }
+                    return;
+                }
                 if (path.endsWith("/capture")) {
                     CAPTURE_CALLS.add(call);
                     String id = path.substring("/v2/checkout/orders/".length(), path.length() - "/capture".length());

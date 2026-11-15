@@ -56,8 +56,11 @@ class WebhookSenderTest {
         assertThat(result.statusCode()).isEqualTo(200);
         ReceiverStub.Request request = receiver.requests().getFirst();
         assertThat(request.body()).isEqualTo(body);
+        // signed: timestamp header + "." + the raw body bytes, so a captured delivery cannot be replayed later with
+        // a fresh timestamp (5-69)
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        mac.update((request.header("X-Shopapp-Timestamp") + ".").getBytes(StandardCharsets.UTF_8));
         String expected = "sha256=" + HexFormat.of().formatHex(mac.doFinal(body));
         assertThat(request.header("X-Hub-Signature-256")).isEqualTo(expected);
         assertThat(request.header("X-Shopapp-Delivery")).isEqualTo(deliveryId.toString());

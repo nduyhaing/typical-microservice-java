@@ -106,7 +106,8 @@ class SampleDataIT extends ProductDatabaseSupport {
     void softDeletedAndHardDeletedSampleProducts_areRestored() throws Exception {
         load().andExpect(status().isOk());
         // product's admin delete only unpublishes (3a-17); for a variation it also drops its option combination
-        admin.update("update product set is_published = false where slug in ('iphone-16', 'galaxy-s24-black')");
+        admin.update("update product set is_published = false, last_modified_on = now() - interval '1 day'"
+            + " where slug in ('iphone-16', 'galaxy-s24-black')");
         admin.update("delete from product_option_combination where product_id ="
             + " (select id from product where slug = 'galaxy-s24-black')");
         // gone entirely (e.g. removed in the database)
@@ -125,6 +126,10 @@ class SampleDataIT extends ProductDatabaseSupport {
 
         assertThat(admin.queryForList("select slug from product where not is_published", String.class))
             .containsExactly("prototype-phone");
+        // a republish is a new version of the product: recommendation and search see it as newer than the removal
+        // (decisions.md 5-70)
+        assertThat(admin.queryForObject("select count(*) from product where slug in ('iphone-16', 'galaxy-s24-black')"
+            + " and last_modified_on > now() - interval '1 minute'", Integer.class)).isEqualTo(2);
         assertThat(admin.queryForObject("select count(*) from product_category pc join product p on p.id ="
             + " pc.product_id where p.slug = 'usb-c-cable'", Integer.class)).isEqualTo(1);
         assertThat(count("product")).isEqualTo(25);

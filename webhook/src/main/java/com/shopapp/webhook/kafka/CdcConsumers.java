@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -23,17 +24,37 @@ public class CdcConsumers {
     @KafkaListener(id = "product-cdc-webhook", topics = "${shopapp.webhook.cdc.product-topic}",
         groupId = "${spring.kafka.consumer.group-id:webhook}")
     public void onProduct(ConsumerRecord<String, String> record) {
-        service.onProduct(CdcMessage.parse(mapper, record.key(), record.value()), sourceKey(record));
+        CdcMessage message = CdcMessage.parse(mapper, record.key(), record.value());
+        service.onProduct(message, sourceKey(record, message));
     }
 
     @KafkaListener(id = "order-cdc-webhook", topics = "${shopapp.webhook.cdc.order-topic}",
         groupId = "${spring.kafka.consumer.group-id:webhook}")
     public void onOrder(ConsumerRecord<String, String> record) {
-        service.onOrder(CdcMessage.parse(mapper, record.key(), record.value()), sourceKey(record));
+        CdcMessage message = CdcMessage.parse(mapper, record.key(), record.value());
+        service.onOrder(message, sourceKey(record, message));
     }
 
-    /** Identifies the message: a redelivery after a crash queues no second delivery. */
-    static String sourceKey(ConsumerRecord<?, ?> record) {
-        return record.topic() + "-" + record.partition() + "@" + record.offset();
+    /**
+     * Identifies the database change behind the message, so a redelivery (after a crash, or the same change read
+     * again from another offset) queues no second delivery, while a new change is never mistaken for an old one
+     * (decisions.md 5-64): Debezium's {@code source.lsn} + {@code txId} + schema.table + row id. Offsets alone were
+     * reused after a topic reset and silently dropped new events. Without a source block (never for row events):
+     * the record timestamp + topic-partition@offset.
+     */
+    static String sourceKey(ConsumerRecord<?, ?> record, CdcMessage message) {
+        JsonNode source = message.source();
+        if (source != null && source.hasNonNull("lsn")) {
+            return "lsn:" + scalar(source.get("lsn")) + ":tx:" + scalar(source.get("txId")) + ":"
+                + scalar(source.get("schema")) + "." + scalar(source.get("table")) + ":" + message.id();
+        }
+        return "ts:" + record.timestamp() + ":" + record.topic() + "-" + record.partition() + "@" + record.offset();
+    }
+
+    private static String scalar(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return "-";
+        }
+        return node.isNumber() ? node.numberValue().toString() : node.asString();
     }
 }

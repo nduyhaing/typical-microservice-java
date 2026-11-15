@@ -6,6 +6,7 @@ import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -25,8 +26,12 @@ public class SecurityConfig {
                     "/error", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/storefront/**").permitAll()
                 .requestMatchers("/backoffice/**").hasRole("ADMIN")
-                // payment service only, with its client-credentials token; also refused at the edge (5-5, 5-6)
-                .requestMatchers("/internal/**").hasRole("SERVICE")
+                // payment service only, with its client-credentials token; also refused at the edge (5-5, 5-6);
+                // per-capability roles (5-66): reading an order vs. marking it paid / payment in progress
+                .requestMatchers(HttpMethod.GET, "/internal/orders/*").hasRole("SERVICE_ORDER_READ")
+                .requestMatchers(HttpMethod.PUT, "/internal/orders/*/payment", "/internal/orders/*/payment-in-progress")
+                .hasRole("SERVICE_ORDER_PAYMENT")
+                .requestMatchers("/internal/**").denyAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .build();

@@ -62,10 +62,23 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
         + " AND promotion_usage_released_on IS NULL", nativeQuery = true)
     int markCouponReleased(@Param("id") Long id);
 
-    /** Orders asked to give their stock or coupon use back that still owe one of them (compensation sweep, 5-4). */
+    /**
+     * Orders asked to give their stock or coupon use back that still owe one of them (compensation sweep, 5-4), due
+     * for another attempt: never tried by the sweep first, then the longest-waiting; an order whose attempts keep
+     * failing waits 2^attempts minutes (at most an hour) between them, so it cannot starve the others (5-65).
+     */
     @Query(value = "SELECT id FROM \"order\" WHERE goods_back_requested_on IS NOT NULL"
         + " AND ((stock_reference IS NOT NULL AND stock_restored_on IS NULL)"
         + " OR (promotion_usage_reference IS NOT NULL AND promotion_usage_released_on IS NULL))"
-        + " ORDER BY id LIMIT :limit", nativeQuery = true)
+        + " AND (goods_back_last_attempt_on IS NULL OR goods_back_last_attempt_on"
+        + " + least(power(2, least(goods_back_attempts, 6)), 60) * interval '1 minute' <= now())"
+        + " ORDER BY goods_back_last_attempt_on NULLS FIRST, id LIMIT :limit", nativeQuery = true)
     List<Long> findIdsOwingGoodsBack(@Param("limit") int limit);
+
+    /** Records a give-back attempt that left something owed (the sweep's back-off, 5-65). */
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "UPDATE \"order\" SET goods_back_attempts = goods_back_attempts + 1,"
+        + " goods_back_last_attempt_on = now() WHERE id = :id", nativeQuery = true)
+    int recordGoodsBackAttempt(@Param("id") Long id);
 }

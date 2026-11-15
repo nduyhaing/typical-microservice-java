@@ -26,6 +26,9 @@ class AddressPolicyTest {
         "ff02::1", "ff05::2",
         "2001:db8::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2",
         "64:ff9b::a00:1", "64:ff9b::7f00:1",
+        // SIIT ::ffff:0:a.b.c.d and local-use NAT64 64:ff9b:1::/48 embed an IPv4 address too (5-69)
+        "::ffff:0:7f00:1", "::ffff:0:a00:1", "::ffff:0:a9fe:a9fe",
+        "64:ff9b:1::a00:1", "64:ff9b:1::7f00:1", "64:ff9b:1:a00:1::", "64:ff9b:1:a9fe:a9:fe00::",
         "2002:7f00:1::1", "2002:a00:1::1",
         "100::1"})
     void nonPublicAddresses_areRefused(String address) throws Exception {
@@ -37,6 +40,7 @@ class AddressPolicyTest {
         "93.184.216.34", "8.8.8.8", "1.1.1.1", "172.15.255.255", "172.32.0.1", "192.169.0.1", "100.63.255.255",
         "100.128.0.1", "169.253.255.255", "223.255.255.254",
         "2606:4700:4700::1111", "2a00:1450:4001:80b::200e", "::ffff:93.184.216.34", "64:ff9b::808:808",
+        "::ffff:0:808:808", "64:ff9b:1::808:808",
         "2002:808:808::1"})
     void publicAddresses_areAllowed(String address) throws Exception {
         assertThat(AddressPolicy.isPublic(InetAddress.getByName(address))).as(address).isTrue();

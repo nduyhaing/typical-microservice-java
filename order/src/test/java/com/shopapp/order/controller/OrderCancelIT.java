@@ -26,10 +26,23 @@ class OrderCancelIT extends OrderItSupport {
     @Autowired
     private OrderGoodsBackService goodsBackService;
 
+    @Autowired
+    private com.shopapp.order.repository.OrderRepository orderRepository;
+
     private Map<String, Object> orderRow(long id) {
         return jdbc.queryForMap("select status, payment_status, shipment_status, stock_reference,"
             + " promotion_usage_reference::text as coupon_reference, goods_back_requested_on, stock_restored_on,"
             + " promotion_usage_released_on from \"order\" where id = ?", id);
+    }
+
+    private int attempts(long id) {
+        return jdbc.queryForObject("select goods_back_attempts from \"order\" where id = ?", Integer.class, id);
+    }
+
+    /** Moves the order's last give-back attempt an hour back, past any back-off. */
+    private void dueAgain(long id) {
+        jdbc.update("update \"order\" set goods_back_last_attempt_on = now() - interval '61 minutes' where id = ?",
+            id);
     }
 
     private long couponOrder(String customer) throws Exception {
@@ -157,12 +170,17 @@ class OrderCancelIT extends OrderItSupport {
         assertThat(pending.get("stock_restored_on")).isNull();
         assertThat(pending.get("promotion_usage_released_on")).isNotNull();
 
-        // still down: the sweep tries again and records nothing
+        // still down: the sweep tries again (once the back-off passed) and records nothing
+        assertThat(attempts(id)).isEqualTo(1);
+        goodsBackService.retryPending();
+        assertThat(INTERNAL_RESTORE_CALLS).hasSize(1); // within the back-off: not tried again
+        dueAgain(id);
         goodsBackService.retryPending();
         assertThat(orderRow(id).get("stock_restored_on")).isNull();
 
         // back up: the sweep gives the stock back; the coupon (already released) is not released again
         INTERNAL_RESTORE_STATUS.set(204);
+        dueAgain(id);
         goodsBackService.retryPending();
         assertThat(orderRow(id).get("stock_restored_on")).isNotNull();
         assertThat(INTERNAL_RESTORE_CALLS).hasSize(3)
@@ -213,5 +231,39 @@ class OrderCancelIT extends OrderItSupport {
 
         assertThat(INTERNAL_RESTORE_CALLS).isEmpty();
         assertThat(orderRow(id).get("status")).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void sweep_triesTheLeastRecentlyTriedFirst_andBacksOffAnOrderThatKeepsFailing() throws Exception {
+        INTERNAL_RESTORE_STATUS.set(503);
+        long recent = placedOrder("u-1", ONE_PHONE, "");
+        long neverSwept = placedOrder("u-1", ONE_PHONE, "");
+        long longAgo = placedOrder("u-1", ONE_PHONE, "");
+        for (long id : List.of(recent, neverSwept, longAgo)) {
+            mockMvc.perform(post("/storefront/orders/{id}/cancel", id).with(customer("u-1")))
+                .andExpect(status().isOk());
+        }
+        // recent: failed a minute ago (back-off 2 min); neverSwept: no attempt recorded; longAgo: 10 failures, the
+        // last 61 minutes ago (back-off capped at an hour)
+        jdbc.update("update \"order\" set goods_back_last_attempt_on = now() - interval '1 minute' where id = ?",
+            recent);
+        jdbc.update("update \"order\" set goods_back_attempts = 0, goods_back_last_attempt_on = null where id = ?",
+            neverSwept);
+        jdbc.update("update \"order\" set goods_back_attempts = 10,"
+            + " goods_back_last_attempt_on = now() - interval '61 minutes' where id = ?", longAgo);
+
+        assertThat(orderRepository.findIdsOwingGoodsBack(1)).containsExactly(neverSwept);
+        assertThat(orderRepository.findIdsOwingGoodsBack(10)).containsExactly(neverSwept, longAgo);
+
+        INTERNAL_RESTORE_CALLS.clear();
+        goodsBackService.retryPending();
+
+        assertThat(INTERNAL_RESTORE_CALLS).extracting(call -> call.param("reference")).containsExactlyInAnyOrder(
+            (String) orderRow(neverSwept).get("stock_reference"), (String) orderRow(longAgo).get("stock_reference"));
+        assertThat(attempts(neverSwept)).isEqualTo(1);
+        assertThat(attempts(longAgo)).isEqualTo(11);
+        assertThat(attempts(recent)).isEqualTo(1);
+        // just tried: none is due now
+        assertThat(orderRepository.findIdsOwingGoodsBack(10)).isEmpty();
     }
 }

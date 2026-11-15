@@ -55,12 +55,16 @@ public class OrderGoodsBackService {
             }
         }
         if (!done) {
+            orderRepository.recordGoodsBackAttempt(orderId);
             log.warn("Order {} still owes its stock or coupon use back; retried later", orderId);
         }
         return done;
     }
 
-    /** Retries orders whose stock or coupon use could not be given back (product or promotion was down). */
+    /**
+     * Retries orders whose stock or coupon use could not be given back (product or promotion was down), at most
+     * {@link #SWEEP_BATCH} per run, the least recently tried first, with a back-off per order (5-65).
+     */
     @Scheduled(initialDelayString = "${shopapp.order.goods-back-retry:PT5M}",
         fixedDelayString = "${shopapp.order.goods-back-retry:PT5M}")
     public void retryPending() {

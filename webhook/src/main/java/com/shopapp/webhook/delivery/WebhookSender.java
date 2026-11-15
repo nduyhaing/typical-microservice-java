@@ -103,10 +103,11 @@ public class WebhookSender implements AutoCloseable {
         }
         HttpPost post = new HttpPost(uri);
         post.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
-        post.setHeader(HmacSigner.HEADER, HmacSigner.sign(body, secret));
+        String timestamp = Long.toString(Instant.now().getEpochSecond());
+        post.setHeader(HmacSigner.HEADER, HmacSigner.sign(timestamp, body, secret));
         post.setHeader(DELIVERY_HEADER, deliveryId.toString());
         post.setHeader(EVENT_HEADER, eventName);
-        post.setHeader(TIMESTAMP_HEADER, Long.toString(Instant.now().getEpochSecond()));
+        post.setHeader(TIMESTAMP_HEADER, timestamp);
         ScheduledFuture<?> deadline = deadlines.schedule(post::cancel, limits.totalTimeoutMs(),
             TimeUnit.MILLISECONDS);
         try (ClassicHttpResponse response = client.executeOpen(null, post, null)) {

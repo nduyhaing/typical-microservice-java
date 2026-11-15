@@ -55,7 +55,7 @@ describe('PaymentService', () => {
     expect(post).toHaveBeenCalledWith('/payment/init', { orderId: 7, paymentMethod: 'COD' });
   });
 
-  it('capture sends the PayPal token, cancel passes it as a query parameter, providers are the storefront list',
+  it('capture and cancel POST the PayPal token (a state change is never a GET), providers are the storefront list',
     async () => {
       const post = vi.spyOn(api, 'post').mockResolvedValue({});
       const get = vi.spyOn(api, 'get').mockResolvedValue([]);
@@ -63,7 +63,8 @@ describe('PaymentService', () => {
       await paymentService.cancelPayment('5O190127TN364715T');
       await paymentService.getPaymentProviders();
       expect(post).toHaveBeenCalledWith('/payment/capture', { token: '5O190127TN364715T' });
-      expect(get).toHaveBeenCalledWith('/payment/cancel?token=5O190127TN364715T');
+      expect(post).toHaveBeenCalledWith('/payment/cancel', { token: '5O190127TN364715T' });
+      expect(get).not.toHaveBeenCalledWith(expect.stringContaining('/payment/cancel'));
       expect(get).toHaveBeenCalledWith('/payment/storefront/payment-providers');
     });
 });

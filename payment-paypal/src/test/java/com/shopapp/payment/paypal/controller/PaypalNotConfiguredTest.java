@@ -40,13 +40,14 @@ class PaypalNotConfiguredTest {
     }
 
     private static RequestPostProcessor service() {
-        return jwt().authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
+        return jwt().authorities(new SimpleGrantedAuthority("ROLE_SERVICE_PAYPAL"));
     }
 
     @Test
     void create_andCapture_are503() throws Exception {
         mockMvc.perform(post("/internal/orders").with(service()).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"amount\":12.34,\"reference\":\"payment-7\"}"))
+                .content("{\"amount\":12.34,\"reference\":\"payment-7\","
+                    + "\"requestId\":\"7d0c4e9a-3f1b-4c2a-9e8d-1a2b3c4d5e6f\"}"))
             .andExpect(status().isServiceUnavailable())
             .andExpect(jsonPath("$.detail").value("PayPal is not configured"));
         mockMvc.perform(post("/internal/orders/5O190127TN364715T/capture").with(service()))

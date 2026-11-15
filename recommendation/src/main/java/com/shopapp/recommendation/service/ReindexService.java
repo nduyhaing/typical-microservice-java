@@ -28,7 +28,9 @@ public class ReindexService {
                 break;
             }
             for (ProductIdPageVm.Item item : ids.productContent()) {
-                switch (syncService.sync(item.id(), null)) {
+                // a product product no longer shows is removed at its own version, never "now": a republish (which
+                // moves lastModifiedOn on) always wins over the removal, whatever the clocks say (5-70)
+                switch (syncService.sync(item.id(), item.version())) {
                     case EMBEDDED -> embedded++;
                     case REMOVED -> removed++;
                     default -> { }

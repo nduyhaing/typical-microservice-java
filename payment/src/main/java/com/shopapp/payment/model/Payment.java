@@ -10,7 +10,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -21,7 +24,8 @@ import lombok.Setter;
  * One payment attempt for an order (YAS {@code Payment}). {@code amount} is always the order total read from the
  * order service, never a client value; {@code customerId} is the order's owner (JWT {@code sub}).
  * {@code paymentProviderCheckoutId} is the PayPal order id, {@code gatewayTransactionId} the PayPal capture id (both
- * unique). {@code orderConfirmed}: the order service accepted the payment (decisions.md 5-12, 5-13).
+ * unique). {@code orderConfirmed}: the order service accepted the payment (decisions.md 5-12, 5-13);
+ * {@code orderRefused}: it refused it (refund by hand, 5-61).
  */
 @Entity
 @Table(name = "payment")
@@ -59,6 +63,21 @@ public class Payment extends AbstractAuditEntity {
     private String failureMessage;
 
     private boolean orderConfirmed;
+
+    /** Order refused the completed payment (e.g. cancelled or paid otherwise): needs a manual refund (5-61). */
+    private boolean orderRefused;
+
+    /** How often telling order about the completed payment failed, and when the reconciler tries next (5-61). */
+    private int orderConfirmAttempts;
+
+    private ZonedDateTime nextOrderConfirmOn;
+
+    /** This payment's own PayPal-Request-Id for creating its PayPal order (5-67). */
+    private UUID paypalRequestId;
+
+    /** Optimistic lock: a stale copy can never overwrite a newer state (5-60). */
+    @Version
+    private Long version;
 
     /** Our reference at PayPal ({@code custom_id}): checked again when the capture comes back. */
     public String reference() {

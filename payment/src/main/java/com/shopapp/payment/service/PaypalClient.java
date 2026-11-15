@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -68,12 +69,15 @@ public class PaypalClient {
         statusUntil = Instant.MIN;
     }
 
-    /** Creates a PayPal order for the amount under our reference and answers the approval URL. */
-    public PaypalOrderVm createOrder(BigDecimal amount, String reference) {
+    /**
+     * Creates a PayPal order for the amount under our reference, idempotent per {@code requestId} (the payment's own
+     * PayPal-Request-Id, 5-67), and answers the approval URL.
+     */
+    public PaypalOrderVm createOrder(BigDecimal amount, String reference, UUID requestId) {
         PaypalOrderVm order = call("create a PayPal order for " + reference, token -> restClient.post()
             .uri("/internal/orders")
             .headers(headers -> headers.setBearerAuth(token))
-            .body(new PaypalOrderPostVm(amount, reference))
+            .body(new PaypalOrderPostVm(amount, reference, requestId))
             .retrieve()
             .body(PaypalOrderVm.class));
         if (order == null || order.paypalOrderId() == null || order.approvalUrl() == null) {

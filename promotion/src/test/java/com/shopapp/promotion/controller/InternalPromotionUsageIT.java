@@ -30,7 +30,7 @@ class InternalPromotionUsageIT extends AbstractPromotionIT {
 
     private static RequestPostProcessor service() {
         return jwt().jwt(token -> token.subject("service-account-order-service"))
-            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
+            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE_GOODS_BACK"));
     }
 
     private static String limited(String code, int limit) {
@@ -108,6 +108,11 @@ class InternalPromotionUsageIT extends AbstractPromotionIT {
         release(reference, customer("customer-1")).andExpect(status().isForbidden());
         release(reference, admin()).andExpect(status().isForbidden());
         release(reference, csrf()).andExpect(status().isUnauthorized());
+        // another service's capability (the payment service's) and the old catch-all SERVICE role (5-66)
+        release(reference, jwt().authorities(new SimpleGrantedAuthority("ROLE_SERVICE_ORDER_PAYMENT")))
+            .andExpect(status().isForbidden());
+        release(reference, jwt().authorities(new SimpleGrantedAuthority("ROLE_SERVICE")))
+            .andExpect(status().isForbidden());
         assertThat(usageCount(id)).isEqualTo(1);
     }
 }

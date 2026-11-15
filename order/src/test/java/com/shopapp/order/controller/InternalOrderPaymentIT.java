@@ -108,4 +108,78 @@ class InternalOrderPaymentIT extends OrderItSupport {
         mockMvc.perform(get("/internal/orders/{id}", id)).andExpect(status().isUnauthorized());
         assertThat(statusOf(id)).isEqualTo("PENDING_PAYMENT");
     }
+
+    @Test
+    void wrongCapability_isRefused() throws Exception {
+        long id = placedOrder("u-1", ONE_PHONE, "");
+
+        // the order service's own token (stock/coupon give-back) and the old catch-all SERVICE role
+        mockMvc.perform(pay(id, 7, "819.00").with(serviceWith("SERVICE_GOODS_BACK")))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(pay(id, 7, "819.00").with(serviceWith("SERVICE"))).andExpect(status().isForbidden());
+        // reading is not paying
+        mockMvc.perform(pay(id, 7, "819.00").with(serviceWith("SERVICE_ORDER_READ"))).andExpect(status().isForbidden());
+        mockMvc.perform(put("/internal/orders/{id}/payment-in-progress", id).with(serviceWith("SERVICE_ORDER_READ")))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/orders/{id}", id).with(serviceWith("SERVICE_GOODS_BACK")))
+            .andExpect(status().isForbidden());
+        mockMvc.perform(get("/internal/orders/{id}", id).with(serviceWith("SERVICE_ORDER_READ")))
+            .andExpect(status().isOk());
+        assertThat(statusOf(id)).isEqualTo("PENDING_PAYMENT");
+    }
+
+    @Test
+    void paymentInProgress_blocksCustomerAndAdminCancel_untilPaid() throws Exception {
+        long id = placedOrder("u-1", ONE_PHONE, "");
+
+        mockMvc.perform(put("/internal/orders/{id}/payment-in-progress", id).with(service()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalPrice").value(819.0));
+        assertThat(jdbc.queryForObject("select payment_in_progress_until > now() from \"order\" where id = ?",
+            Boolean.class, id)).isTrue();
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/storefront/orders/{id}/cancel", id).with(customer("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value(
+                "Order " + id + " is being paid right now; try again in a few minutes"));
+        mockMvc.perform(json(put("/backoffice/orders/{id}/status", id), "{\"orderStatus\":\"CANCELLED\"}")
+            .with(admin())).andExpect(status().isBadRequest());
+        mockMvc.perform(json(put("/backoffice/orders/{id}/status", id), "{\"orderStatus\":\"REJECT\"}")
+            .with(admin())).andExpect(status().isBadRequest());
+        assertThat(statusOf(id)).isEqualTo("PENDING_PAYMENT");
+        assertThat(INTERNAL_RESTORE_CALLS).isEmpty();
+
+        payAsService(id, 7, "819.00").andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("select payment_in_progress_until from \"order\" where id = ?",
+            java.sql.Timestamp.class, id)).isNull();
+    }
+
+    @Test
+    void expiredPaymentInProgress_doesNotBlockCancel() throws Exception {
+        long id = placedOrder("u-1", ONE_PHONE, "");
+        jdbc.update("update \"order\" set payment_in_progress_until = now() - interval '1 second' where id = ?", id);
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                .post("/storefront/orders/{id}/cancel", id).with(customer("u-1")))
+            .andExpect(status().isOk());
+        assertThat(statusOf(id)).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void paymentInProgress_ofAPaidOrEndedOrder_isRefused() throws Exception {
+        long paid = placedOrder("u-1", ONE_PHONE, "");
+        payAsService(paid, 7, "819.00").andExpect(status().isOk());
+        mockMvc.perform(put("/internal/orders/{id}/payment-in-progress", paid).with(service()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Order " + paid + " is already paid"));
+
+        long cancelled = placedOrder("u-1", ONE_PHONE, "");
+        jdbc.update("update \"order\" set status = 'CANCELLED', payment_status = 'CANCELLED' where id = ?",
+            cancelled);
+        mockMvc.perform(put("/internal/orders/{id}/payment-in-progress", cancelled).with(service()))
+            .andExpect(status().isBadRequest());
+        assertThat(jdbc.queryForObject("select payment_in_progress_until from \"order\" where id = ?",
+            java.sql.Timestamp.class, cancelled)).isNull();
+    }
 }

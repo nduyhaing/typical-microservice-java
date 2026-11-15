@@ -62,6 +62,41 @@ public class OrderClient {
     }
 
     /**
+     * Tells order a capture is about to run (decisions.md 5-62): order blocks cancelling the order for a short time
+     * and answers the order (the amount to capture). Order refusing (already paid, ended) is a 400 with order's
+     * reason; order down a 503 — either way nothing is captured.
+     */
+    public OrderPaymentInfoVm markPaymentInProgress(Long orderId, Long paymentId) {
+        try {
+            OrderPaymentInfoVm order = ServiceCalls.send(tokens, token -> restClient.put()
+                .uri("/internal/orders/{id}/payment-in-progress", orderId)
+                .headers(headers -> headers.setBearerAuth(token))
+                .retrieve()
+                .body(OrderPaymentInfoVm.class));
+            if (order == null) {
+                throw new RestClientException("empty answer");
+            }
+            return order;
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode().isSameCodeAs(HttpStatus.BAD_REQUEST)
+                || ex.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)) {
+                RemoteErrorVm error = ServiceCalls.errorBody(ex);
+                String detail = error == null || error.detail() == null
+                    ? "The order cannot be paid" : error.detail();
+                log.warn("Order refused to start payment {} of order {}: {}", paymentId, orderId, detail);
+                throw new PaymentException(HttpStatus.BAD_REQUEST, null, detail);
+            }
+            log.error("Order refused to start payment {} of order {} with {}", paymentId, orderId,
+                ex.getStatusCode());
+            throw PaymentException.unavailable(Constants.ErrorCode.ORDER_SERVICE_UNAVAILABLE);
+        } catch (RestClientException | ServiceTokenProvider.ServiceTokenException ex) {
+            log.error("Could not mark order {} payment in progress (payment {}): {}", orderId, paymentId,
+                ex.getMessage());
+            throw PaymentException.unavailable(Constants.ErrorCode.ORDER_SERVICE_UNAVAILABLE);
+        }
+    }
+
+    /**
      * Tells order the payment is complete (order checks the amount, idempotent per payment id).
      *
      * @throws PaymentException 400 with order's reason when order refuses, 503 when it is down

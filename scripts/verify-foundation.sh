@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx webhook webhook-receiver payment payment-paypal)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx webhook webhook-receiver payment payment-paypal sampledata recommendation)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -819,6 +819,15 @@ sys.exit(0 if o.get('orderStatus')=='PENDING_PAYMENT' and D(str(o['tax']))>0
     fi
     sellable=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")" | json "d['stockQuantity']")
     [ "$sellable" = "1" ] || fail "the refused order changed the stock (sellable '$sellable', expected 1)"
+    # the customer cancels the unpaid order: its 2 units come back (decisions.md 5-4)
+    r=$(sf POST "/api/order/storefront/orders/$(json "d['id']" <<< "$order")/cancel")
+    if [ "$(status_of "$r")" = "200" ] && [ "$(body_of "$r" | json "d['orderStatus']")" = "CANCELLED" ]; then
+        pass "customer cancels unpaid order #$(json "d['id']" <<< "$order")"
+    else
+        fail "customer cancels order #$(json "d['id']" <<< "$order") -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+    fi
+    sellable=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")" | json "d['stockQuantity']")
+    if [ "$sellable" = "3" ]; then pass "the cancel gave the 2 units back (sellable stock 1 -> 3)"; else fail "sellable stock after the cancel is '$sellable', expected 3"; fi
 }
 
 # Puts everything back; safe to run twice. Fails loudly when the product could not be restored.
@@ -1134,6 +1143,14 @@ sys.exit(0 if o.get('couponCode')==p['couponCode'] and D(str(o['discount']))==D(
     else
         fail "second order with the used coupon -> $(status_of "$r") $(body_of "$r" | head -c 200)"
     fi
+    # the customer cancels the coupon order: the coupon use comes back (decisions.md 5-4)
+    r=$(sf POST "/api/order/storefront/orders/$(json "d['id']" <<< "$order")/cancel")
+    if [ "$(status_of "$r")" = "200" ] \
+        && [ "$(body_of "$(bo GET "/api/promotion/backoffice/promotions/$S4_PROMO_ID")" | json "d['usageCount']")" = "0" ]; then
+        pass "customer cancels coupon order #$(json "d['id']" <<< "$order"): coupon usage back to 0"
+    else
+        fail "cancel the coupon order -> $(status_of "$r"), usage '$(body_of "$(bo GET "/api/promotion/backoffice/promotions/$S4_PROMO_ID")" | json "d['usageCount']")'"
+    fi
     state_after=$(product_state)
     if [ "$state_after" = "$state_before" ] && [ "$(wc -w <<< "$state_before")" = "2" ]; then
         pass "Galaxy S24 (Violet's parent) and USB-C Cable keep their stock and tax class (id:stock:taxClass:tracked $state_after)"
@@ -1141,7 +1158,7 @@ sys.exit(0 if o.get('couponCode')==p['couponCode'] and D(str(o['discount']))==D(
         fail "product state changed by the coupon check: before '$state_before', after '$state_after'"
     fi
     r=$(s4_retire_promotion "$S4_PROMO_ID") && S4_PROMO_ID=""
-    if [ -z "$S4_PROMO_ID" ] && [ "$r" = "deactivated" ]; then pass "admin deactivates the used coupon"; else fail "deactivate the used coupon -> ${r:-failed}"; fi
+    if [ -z "$S4_PROMO_ID" ] && [ -n "$r" ]; then pass "admin retires the smoke coupon ($r)"; else fail "retire the smoke coupon -> ${r:-failed}"; fi
     check_body "back office promotions page" "$(url backoffice /promotion/manager-promotion)" 200 'id="__next"' -b "$ADMIN_JAR"
 }
 
@@ -1190,7 +1207,8 @@ webhook_received() {
 import hashlib, hmac, json, sys
 log, secret, event = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
 body = log["body"].encode("utf-8")
-expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+signed = (log["timestamp"] + ".").encode("utf-8") + body  # timestamp + "." + raw body (decisions.md 5-69)
+expected = "sha256=" + hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
 payload = json.loads(body)
 assert log["signature"] == expected and payload["event"] == event
 assert payload["deliveryId"] == log["delivery"] and log["timestamp"]
@@ -1277,6 +1295,53 @@ check_webhook() {
     if [ "$status" = "204" ]; then pass "remove the product webhook"; else fail "remove webhook $webhook_id -> $status"; fi
 }
 
+# Slice 5 sample data (decisions.md 5-50..5-54): loading twice inserts nothing the second time; customers are refused.
+check_sampledata() {
+    local token customer_token r
+    token=$(webhook_token)
+    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
+    r=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $customer_token" \
+        "$(url api /sampledata/backoffice/sampledata)" || true)
+    if [ "$r" = "403" ]; then pass "a customer cannot load the sample data (403)"; else fail "customer sample data load -> $r (expected 403)"; fi
+    r=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer $token" "$(url api /sampledata/backoffice/sampledata)" || true)
+    if [ "$(status_of "$r")" != "200" ]; then
+        fail "admin loads the sample data -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+        return
+    fi
+    pass "admin loads the sample data ($(body_of "$r" | json "d['total']") rows inserted, $(body_of "$r" | json "d['republished']") republished)"
+    r=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer $token" "$(url api /sampledata/backoffice/sampledata)" || true)
+    if [ "$(status_of "$r")" = "200" ] && [ "$(body_of "$r" | json "d['total']")" = "0" ] \
+        && [ "$(body_of "$r" | json "d['republished']")" = "0" ]; then
+        pass "loading the sample data again inserts and republishes nothing"
+    else
+        fail "second sample data load -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+    fi
+}
+
+# Slice 5 recommendation (decisions.md 5-40..5-49): Galaxy S24's similar products are published products other than
+# itself, and the product page shows them.
+check_recommendation() {
+    local s24_id list slugs slug bad=""
+    s24_id=$(curl -s "$(url api /product/storefront/product/galaxy-s24)" | json "d['id']")
+    list=$(curl -s "$(url api "/recommendation/embedding/product/$s24_id/similarity")" || true)
+    slugs=$(json "' '.join(p['slug'] for p in d)" <<< "$list")
+    if [ -z "$s24_id" ] || [ -z "$slugs" ]; then
+        fail "Galaxy S24 has similar products (recommendation answered: ${list:0:200})"
+        return
+    fi
+    if [ "$(json "any(p['id']==$s24_id for p in d)" <<< "$list")" = "False" ]; then
+        pass "Galaxy S24's similar products exclude itself: $slugs"
+    else
+        fail "Galaxy S24 is listed as similar to itself: $slugs"
+    fi
+    for slug in $slugs; do
+        [ "$(curl -s -o /dev/null -w '%{http_code}' "$(url api "/product/storefront/product/$slug")" || true)" = "200" ] || bad="$bad $slug"
+    done
+    if [ -z "$bad" ]; then pass "every similar product is published"; else fail "similar products that are not published:$bad"; fi
+    check_body "product page shows Similar products" "$(url storefront /products/galaxy-s24)" 200 'Similar products'
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -1298,6 +1363,8 @@ run_checks() {
     check_search
     check_slice4
     check_webhook
+    check_sampledata
+    check_recommendation
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

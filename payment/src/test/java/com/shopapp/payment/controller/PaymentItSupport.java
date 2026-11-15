@@ -16,7 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -67,6 +69,11 @@ abstract class PaymentItSupport {
     static final Map<Long, Long> ORDER_PAYMENT_IDS = new ConcurrentHashMap<>();
     static final List<Call> ORDER_GET_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> ORDER_PAY_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> ORDER_IN_PROGRESS_CALLS = new CopyOnWriteArrayList<>();
+    /** When set, the PayPal capture stub waits for it (a capture that is still running at PayPal). */
+    static final AtomicReference<CountDownLatch> CAPTURE_GATE = new AtomicReference<>();
+    /** When set, the PayPal create stub waits for it. */
+    static final AtomicReference<CountDownLatch> CREATE_GATE = new AtomicReference<>();
     /** Status of order's mark-paid stub: 200 marks the stub order paid, anything else is answered as is. */
     static final AtomicInteger ORDER_PAY_STATUS = new AtomicInteger(200);
     static final AtomicBoolean ORDER_DOWN = new AtomicBoolean(false);
@@ -109,8 +116,9 @@ abstract class PaymentItSupport {
                 Call call = record(exchange);
                 String rest = call.path().substring("/order/internal/orders/".length());
                 boolean pay = rest.endsWith("/payment");
-                long id = Long.parseLong(pay ? rest.substring(0, rest.length() - "/payment".length()) : rest);
-                (pay ? ORDER_PAY_CALLS : ORDER_GET_CALLS).add(call);
+                boolean inProgress = rest.endsWith("/payment-in-progress");
+                long id = Long.parseLong(rest.replaceAll("/.*", ""));
+                (pay ? ORDER_PAY_CALLS : inProgress ? ORDER_IN_PROGRESS_CALLS : ORDER_GET_CALLS).add(call);
                 StubOrder order = ORDERS.get(id);
                 if (ORDER_DOWN.get()) {
                     respond(exchange, 503, "");
@@ -119,6 +127,16 @@ abstract class PaymentItSupport {
                 } else if (order == null) {
                     respond(exchange, 404, "{\"statusCode\":\"404 NOT_FOUND\",\"title\":\"Not Found\","
                         + "\"detail\":\"Order " + id + " is not found\",\"fieldErrors\":[]}");
+                } else if (inProgress) {
+                    // as order: an order already paid or ended cannot start a capture (decisions.md 5-62)
+                    if ("COMPLETED".equals(order.paymentStatus())
+                        || java.util.Set.of("CANCELLED", "REJECT", "REFUND").contains(order.orderStatus())) {
+                        respond(exchange, 400, "{\"statusCode\":\"400 BAD_REQUEST\",\"title\":\"Bad Request\","
+                            + "\"detail\":\"Order " + id + " cannot be paid (status " + order.orderStatus()
+                            + ")\",\"fieldErrors\":[]}");
+                    } else {
+                        respond(exchange, 200, order.json(ORDER_PAYMENT_IDS.get(id)));
+                    }
                 } else if (!pay) {
                     respond(exchange, 200, order.json(ORDER_PAYMENT_IDS.get(id)));
                 } else if (ORDER_PAY_STATUS.get() != 200) {
@@ -146,6 +164,7 @@ abstract class PaymentItSupport {
                 }
                 if (call.path().endsWith("/capture")) {
                     PAYPAL_CAPTURE_CALLS.add(call);
+                    awaitGate(CAPTURE_GATE.get());
                     String id = call.path().substring("/payment-paypal/internal/orders/".length(),
                         call.path().length() - "/capture".length());
                     Answer answer = PAYPAL_CAPTURE_ANSWER.get();
@@ -164,6 +183,7 @@ abstract class PaymentItSupport {
                 PAYPAL_CREATE_CALLS.add(call);
                 String id = "PP" + PAYPAL_ORDER_SEQ.incrementAndGet();
                 CREATED_REFERENCES.put(id, com.jayway.jsonpath.JsonPath.read(call.body(), "$.reference"));
+                awaitGate(CREATE_GATE.get());
                 respond(exchange, 200, "{\"paypalOrderId\":\"" + id + "\",\"status\":\"PAYER_ACTION_REQUIRED\","
                     + "\"approvalUrl\":\"https://www.sandbox.paypal.com/checkoutnow?token=" + id + "\"}");
             });
@@ -171,6 +191,17 @@ abstract class PaymentItSupport {
             return server;
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
+        }
+    }
+
+    private static void awaitGate(CountDownLatch gate) {
+        if (gate == null) {
+            return;
+        }
+        try {
+            gate.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -198,6 +229,8 @@ abstract class PaymentItSupport {
         registry.add("shopapp.service-auth.token-uri", () -> base + "/identity/token");
         registry.add("shopapp.service-auth.client-id", () -> "payment-service");
         registry.add("shopapp.service-auth.client-secret", () -> "payment-secret");
+        // the reconciler is run by the tests themselves
+        registry.add("shopapp.payment.reconcile-interval", () -> "PT1H");
     }
 
     @BeforeEach
@@ -206,6 +239,9 @@ abstract class PaymentItSupport {
         ORDER_PAYMENT_IDS.clear();
         ORDER_GET_CALLS.clear();
         ORDER_PAY_CALLS.clear();
+        ORDER_IN_PROGRESS_CALLS.clear();
+        CAPTURE_GATE.set(null);
+        CREATE_GATE.set(null);
         ORDER_PAY_STATUS.set(200);
         ORDER_DOWN.set(false);
         TOKEN_CALLS.clear();
@@ -249,6 +285,27 @@ abstract class PaymentItSupport {
 
     BigDecimal paymentAmount(long paymentId) {
         return jdbc.queryForObject("select amount from payment where id = ?", BigDecimal.class, paymentId);
+    }
+
+    long countWithStatus(String status) {
+        Long count = jdbc.queryForObject("select count(*) from payment where payment_status = ?", Long.class, status);
+        return count == null ? 0 : count;
+    }
+
+    long paymentIdOf(String paypalOrderId) {
+        return jdbc.queryForObject("select id from payment where payment_provider_checkout_id = ?", Long.class,
+            paypalOrderId);
+    }
+
+    /** Waits up to 15 s for the condition. */
+    static void await(String what, java.util.function.BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("timed out waiting for " + what);
+            }
+            Thread.sleep(20);
+        }
     }
 
     long paymentCount() {

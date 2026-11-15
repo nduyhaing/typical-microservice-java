@@ -25,14 +25,17 @@ import org.springframework.web.client.RestClientException;
 /**
  * PayPal Orders v2 over REST (decisions.md 5-21; YAS used the deprecated PayPal Checkout Java SDK): create an order
  * for the exact amount in USD with our payment reference as {@code custom_id} and the storefront return/cancel URLs,
- * then capture it after the buyer approved. Both calls send a {@code PayPal-Request-Id}, so a retried call is
- * idempotent at PayPal. A 401 drops the cached token and retries once.
+ * then capture it after the buyer approved. Both calls send a {@code PayPal-Request-Id} (create: the payment's own
+ * random id, 5-67), so a retried call is idempotent at PayPal. A capture PayPal answers ORDER_ALREADY_CAPTURED (an
+ * earlier capture whose answer was lost) reads the PayPal order and answers its completed capture, which the payment
+ * service verifies as usual. A 401 drops the cached token and retries once.
  */
 @Slf4j
 @Service
 public class PaypalService {
 
     public static final String CURRENCY = "USD";
+    private static final String ALREADY_CAPTURED = "ORDER_ALREADY_CAPTURED";
     private static final Set<String> APPROVAL_RELS = Set.of("payer-action", "approve");
 
     private final PaypalProperties properties;
@@ -70,7 +73,7 @@ public class PaypalService {
                 .uri("/v2/checkout/orders")
                 .headers(headers -> {
                     headers.setBearerAuth(token);
-                    headers.set("PayPal-Request-Id", "create-" + request.reference());
+                    headers.set("PayPal-Request-Id", request.requestId().toString());
                 })
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(body)
@@ -90,17 +93,25 @@ public class PaypalService {
 
     /** Captures an approved PayPal order and answers what PayPal captured (the caller verifies it). */
     public PaypalCaptureVm capture(String paypalOrderId) {
-        OrderResponse order = call("capture PayPal order " + paypalOrderId, paypalOrderId, token ->
-            restClient.post()
-                .uri("/v2/checkout/orders/{id}/capture", paypalOrderId)
-                .headers(headers -> {
-                    headers.setBearerAuth(token);
-                    headers.set("PayPal-Request-Id", "capture-" + paypalOrderId);
-                })
-                .contentType(MediaType.APPLICATION_JSON)
-                .body("{}")
-                .retrieve()
-                .body(OrderResponse.class));
+        OrderResponse order;
+        try {
+            order = call("capture PayPal order " + paypalOrderId, paypalOrderId, token ->
+                restClient.post()
+                    .uri("/v2/checkout/orders/{id}/capture", paypalOrderId)
+                    .headers(headers -> {
+                        headers.setBearerAuth(token);
+                        headers.set("PayPal-Request-Id", "capture-" + paypalOrderId);
+                    })
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body("{}")
+                    .retrieve()
+                    .body(OrderResponse.class));
+        } catch (PaypalException ex) {
+            if (!ALREADY_CAPTURED.equals(ex.getTitle())) {
+                throw ex;
+            }
+            order = alreadyCaptured(paypalOrderId, ex);
+        }
         Capture capture = firstCapture(order);
         if (order == null || capture == null) {
             log.error("PayPal answered a capture without a capture: {}", order);
@@ -112,6 +123,21 @@ public class PaypalService {
         return new PaypalCaptureVm(order.id(), order.status(), capture.id(), capture.status(),
             amount == null ? null : decimal(amount.value()), amount == null ? null : amount.currencyCode(),
             capture.customId(), fee);
+    }
+
+    /** Reads the PayPal order of an ORDER_ALREADY_CAPTURED answer: its completed capture, else the original 400. */
+    private OrderResponse alreadyCaptured(String paypalOrderId, PaypalException refused) {
+        log.warn("PayPal order {} was already captured; reading it to answer its capture", paypalOrderId);
+        OrderResponse order = call("read PayPal order " + paypalOrderId, paypalOrderId, token -> restClient.get()
+            .uri("/v2/checkout/orders/{id}", paypalOrderId)
+            .headers(headers -> headers.setBearerAuth(token))
+            .retrieve()
+            .body(OrderResponse.class));
+        Capture capture = firstCapture(order);
+        if (capture == null || !"COMPLETED".equals(capture.status())) {
+            throw refused;
+        }
+        return order;
     }
 
     private static Capture firstCapture(OrderResponse order) {

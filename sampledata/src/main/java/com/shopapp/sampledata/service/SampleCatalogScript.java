@@ -111,7 +111,10 @@ public final class SampleCatalogScript {
         if (!"product".equals(table) || published < 0 || !"true".equalsIgnoreCase(values.get(published))) {
             return null;
         }
-        return "update product set is_published = true where slug = " + values.get(columns.indexOf("slug"))
+        // a republish is a new version of the product (last_modified_on moves on), so search and recommendation
+        // see it as newer than the removal they recorded (decisions.md 5-70)
+        return "update product set is_published = true, last_modified_on = now() where slug = "
+            + values.get(columns.indexOf("slug"))
             + " and is_published is distinct from true";
     }
 

@@ -38,6 +38,8 @@ const payment = (id: number, patch: Partial<Payment> = {}): Payment => ({
   paymentProviderCheckoutId: null,
   failureMessage: null,
   orderConfirmed: false,
+  orderRefused: false,
+  needsAttention: false,
   createdOn: '2026-11-15T10:00:00Z',
   lastModifiedOn: '2026-11-15T10:00:00Z',
   ...patch,
@@ -68,7 +70,8 @@ describe('PaymentService', () => {
 
     await paymentService.getPaymentProviders();
     await paymentService.updatePaymentProvider(provider('COD', { name: 'Pay on delivery' }));
-    await paymentService.getPayments(2, { orderId: '11', paymentStatus: 'PENDING', paymentMethod: '' });
+    await paymentService.getPayments(2, { orderId: '11', paymentStatus: 'PENDING', paymentMethod: '', needsAttention: false });
+    await paymentService.getPayments(0, { orderId: '', paymentStatus: '', paymentMethod: '', needsAttention: true });
     await paymentService.confirmCodPayment(5);
 
     expect(get).toHaveBeenCalledWith('/payment/backoffice/payment-providers');
@@ -85,6 +88,8 @@ describe('PaymentService', () => {
     expect(params.get('orderId')).toBe('11');
     expect(params.get('paymentStatus')).toBe('PENDING');
     expect(params.has('paymentMethod')).toBe(false);
+    expect(params.has('needsAttention')).toBe(false);
+    expect(new URLSearchParams(get.mock.calls[2][0].split('?')[1]).get('needsAttention')).toBe('true');
     expect(put).toHaveBeenCalledWith('/payment/backoffice/payments/5/confirm', {});
   });
 });
@@ -191,5 +196,32 @@ describe('Payments page', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Confirm cash received' }));
 
     expect(await screen.findByText('Order 11 is already paid')).toBeInTheDocument();
+  });
+
+  it('highlights captured money the order did not accept, and filters to those payments', async () => {
+    const list = vi.spyOn(paymentService, 'getPayments').mockResolvedValue(page([
+      payment(1, { paymentMethod: 'PAYPAL', paymentStatus: 'COMPLETED', gatewayTransactionId: 'CAP1', needsAttention: true }),
+      payment(2, {
+        paymentMethod: 'PAYPAL', paymentStatus: 'COMPLETED', gatewayTransactionId: 'CAP2', needsAttention: true,
+        orderRefused: true, failureMessage: 'Order refused the payment: Order 12 cannot be paid (status CANCELLED)',
+      }),
+      payment(3, { paymentStatus: 'COMPLETED', orderConfirmed: true }),
+    ]));
+
+    render(<PaymentsPage />);
+
+    const retried = (await screen.findByText('#11')).closest('tr') as HTMLElement;
+    const refused = screen.getByText('#12').closest('tr') as HTMLElement;
+    const fine = screen.getByText('#13').closest('tr') as HTMLElement;
+    expect(retried).toHaveClass('table-danger');
+    expect(within(retried).getByText(/order not updated yet, retried automatically/i)).toBeInTheDocument();
+    expect(refused).toHaveClass('table-danger');
+    expect(within(refused).getByText(/refused by the order, refund by hand/i)).toBeInTheDocument();
+    expect(fine).not.toHaveClass('table-danger');
+    expect(within(fine).queryByText(/needs attention/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByLabelText('Needs attention only'));
+    await userEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(0, expect.objectContaining({ needsAttention: true })));
   });
 });

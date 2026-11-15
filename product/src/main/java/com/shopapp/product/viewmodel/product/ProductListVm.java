@@ -14,7 +14,8 @@ public record ProductListVm(Long id,
                             Double price,
                             ZonedDateTime createdOn,
                             Long taxClassId,
-                            Long parentId) {
+                            Long parentId,
+                            ZonedDateTime lastModifiedOn) {
 
     public static ProductListVm fromModel(Product product) {
         return new ProductListVm(
@@ -28,6 +29,7 @@ public record ProductListVm(Long id,
             product.getPrice(),
             product.getCreatedOn(),
             product.getTaxClassId(),
-            product.getParent() == null ? null : product.getParent().getId());
+            product.getParent() == null ? null : product.getParent().getId(),
+            product.getLastModifiedOn());
     }
 }

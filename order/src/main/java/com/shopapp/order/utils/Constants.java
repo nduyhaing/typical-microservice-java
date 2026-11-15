@@ -36,6 +36,7 @@ public final class Constants {
         public static final String ORDER_NOT_CANCELLABLE = "ORDER_NOT_CANCELLABLE";
         public static final String ORDER_ALREADY_PAID = "ORDER_ALREADY_PAID";
         public static final String ORDER_NOT_PAYABLE = "ORDER_NOT_PAYABLE";
+        public static final String ORDER_PAYMENT_IN_PROGRESS = "ORDER_PAYMENT_IN_PROGRESS";
         public static final String PAYMENT_AMOUNT_MISMATCH = "PAYMENT_AMOUNT_MISMATCH";
 
         private ErrorCode() {

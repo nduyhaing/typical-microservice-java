@@ -353,10 +353,16 @@ abstract class OrderItSupport {
             .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
     }
 
-    /** The payment service's client-credentials token (realm role SERVICE). */
+    /** The payment service's client-credentials token (its capability roles, decisions.md 5-66). */
     static RequestPostProcessor service() {
-        return jwt().jwt(token -> token.subject("service-account-payment").tokenValue("token-service"))
-            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
+        return serviceWith("SERVICE_ORDER_READ", "SERVICE_ORDER_PAYMENT");
+    }
+
+    /** A client-credentials token with exactly these realm roles. */
+    static RequestPostProcessor serviceWith(String... roles) {
+        return jwt().jwt(token -> token.subject("service-account-test").tokenValue("token-service"))
+            .authorities(java.util.Arrays.stream(roles).map(role -> new SimpleGrantedAuthority("ROLE_" + role))
+                .toArray(SimpleGrantedAuthority[]::new));
     }
 
     static MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder request, String body) {

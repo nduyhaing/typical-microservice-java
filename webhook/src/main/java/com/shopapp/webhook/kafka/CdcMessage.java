@@ -12,8 +12,13 @@ import tools.jackson.databind.ObjectMapper;
  * @param op     Debezium operation
  * @param before the before image, null when absent (default replica identity sends none for updates)
  * @param after  the after image, null when absent
+ * @param source Debezium's {@code source} block (lsn, txId, schema, table…), null when absent (tombstones)
  */
-public record CdcMessage(long id, String op, JsonNode before, JsonNode after) {
+public record CdcMessage(long id, String op, JsonNode before, JsonNode after, JsonNode source) {
+
+    public CdcMessage(long id, String op, JsonNode before, JsonNode after) {
+        this(id, op, before, after, null);
+    }
 
     /** Parses the message; anything that is not a Debezium row event is a {@link PoisonMessageException}. */
     public static CdcMessage parse(ObjectMapper mapper, String key, String value) {
@@ -28,7 +33,8 @@ public record CdcMessage(long id, String op, JsonNode before, JsonNode after) {
         if (op == null || !op.isString()) {
             throw new PoisonMessageException("CDC message for row " + id + " has no op");
         }
-        return new CdcMessage(id, op.asString(), image(payload.get("before")), image(payload.get("after")));
+        return new CdcMessage(id, op.asString(), image(payload.get("before")), image(payload.get("after")),
+            image(payload.get("source")));
     }
 
     private static JsonNode image(JsonNode node) {

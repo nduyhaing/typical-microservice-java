@@ -38,7 +38,7 @@ class WebhookDeliveryIT extends AbstractWebhookIT {
 
         await("delivered", () -> "DELIVERED".equals(statusOf(id)));
         ReceiverStub.Request request = RECEIVER.requests().getFirst();
-        assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request.body(), SECRET));
+        assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request, SECRET));
         assertThat(request.header("X-Shopapp-Delivery")).isEqualTo(deliveryId);
         assertThat(request.header("X-Shopapp-Event")).isEqualTo("PING");
         assertThat(request.header("X-Shopapp-Timestamp")).isNotBlank();

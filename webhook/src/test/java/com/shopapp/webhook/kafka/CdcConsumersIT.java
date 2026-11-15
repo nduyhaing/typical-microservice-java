@@ -52,7 +52,7 @@ class CdcConsumersIT extends AbstractWebhookIT {
 
         await("product update delivered", () -> receivedBy("/products").size() == 1);
         ReceiverStub.Request request = receivedBy("/products").getFirst();
-        assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request.body(), SECRET));
+        assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request, SECRET));
         assertThat(request.header("X-Shopapp-Event")).isEqualTo("ON_PRODUCT_UPDATED");
         String body = request.bodyText();
         assertThat((String) JsonPath.read(body, "$.event")).isEqualTo("ON_PRODUCT_UPDATED");
@@ -94,7 +94,7 @@ class CdcConsumersIT extends AbstractWebhookIT {
         assertThat(String.join("", bodies)).doesNotContain("jane@example.com", "customer");
         RECEIVER.requests().forEach(request -> {
             try {
-                assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request.body(), SECRET));
+                assertThat(request.header("X-Hub-Signature-256")).isEqualTo(hmac(request, SECRET));
             } catch (Exception ex) {
                 throw new AssertionError(ex);
             }
@@ -110,6 +110,28 @@ class CdcConsumersIT extends AbstractWebhookIT {
         cdcEventService.onOrder(message, "dborder.public.order-0@77");
 
         assertThat(notificationsOf(id)).hasSize(1);
+    }
+
+    @Test
+    void sameOffsetAfterATopicReset_withAnotherLsn_isStillDelivered() throws Exception {
+        long id = createWebhook(receiverUrl(), 2);
+        String before = order("c", 32, null, "PENDING").replace("\"source\":{}",
+            "\"source\":{\"lsn\":24000100,\"txId\":900,\"schema\":\"public\",\"table\":\"order\"}");
+        String after = order("c", 33, null, "PENDING").replace("\"source\":{}",
+            "\"source\":{\"lsn\":25000200,\"txId\":950,\"schema\":\"public\",\"table\":\"order\"}");
+        // the topic was deleted and re-created: a new event arrives at an offset an old one had
+        ConsumerRecord<String, String> old = new ConsumerRecord<>(ORDER_TOPIC, 0, 77, "{\"id\":32}", before);
+        ConsumerRecord<String, String> fresh = new ConsumerRecord<>(ORDER_TOPIC, 0, 77, "{\"id\":33}", after);
+
+        CdcMessage oldMessage = CdcMessage.parse(mapper, old.key(), old.value());
+        cdcEventService.onOrder(oldMessage, CdcConsumers.sourceKey(old, oldMessage));
+        CdcMessage freshMessage = CdcMessage.parse(mapper, fresh.key(), fresh.value());
+        cdcEventService.onOrder(freshMessage, CdcConsumers.sourceKey(fresh, freshMessage));
+        // and the old event read again (another offset) is still not queued twice
+        ConsumerRecord<String, String> reread = new ConsumerRecord<>(ORDER_TOPIC, 0, 5, "{\"id\":32}", before);
+        cdcEventService.onOrder(oldMessage, CdcConsumers.sourceKey(reread, oldMessage));
+
+        assertThat(notificationsOf(id)).hasSize(2);
     }
 
     @Test

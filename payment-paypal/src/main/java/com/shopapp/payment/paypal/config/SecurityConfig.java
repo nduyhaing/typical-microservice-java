@@ -18,7 +18,8 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     /**
-     * Internal API only (decisions.md 5-22): realm role SERVICE (the payment service's client-credentials token);
+     * Internal API only (decisions.md 5-22): capability realm role SERVICE_PAYPAL (5-66; the payment service's
+     * client-credentials token);
      * nginx and both BFFs refuse {@code /payment-paypal/} and every {@code /internal/} path as well.
      */
     @Bean
@@ -27,7 +28,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/actuator/prometheus", "/actuator/health/**", "/swagger-ui", "/swagger-ui/**",
                     "/error", "/v3/api-docs/**").permitAll()
-                .requestMatchers("/internal/**").hasRole("SERVICE")
+                .requestMatchers("/internal/**").hasRole("SERVICE_PAYPAL")
                 .anyRequest().denyAll())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .build();

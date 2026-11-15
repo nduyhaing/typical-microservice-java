@@ -30,8 +30,9 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/prometheus", "/actuator/health/**", "/swagger-ui", "/swagger-ui/**",
                     "/error", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/backoffice/**").hasRole("ADMIN")
-                // order service only, with its client-credentials token; also refused at the edge (5-5)
-                .requestMatchers("/internal/**").hasRole("SERVICE")
+                // order service only, with its client-credentials token; also refused at the edge (5-5);
+                // capability role SERVICE_GOODS_BACK (5-66)
+                .requestMatchers("/internal/**").hasRole("SERVICE_GOODS_BACK")
                 .requestMatchers("/storefront/promotions/**").hasRole("CUSTOMER")
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))

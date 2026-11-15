@@ -111,7 +111,7 @@ export default function WebhookForm({ initial, onSubmit }: Props) {
         </InputGroup>
         <Form.Text>
           {creating
-            ? 'Deliveries carry X-Hub-Signature-256: sha256=HMAC of the body with this secret. Copy it now: it is not shown again.'
+            ? 'Deliveries carry X-Hub-Signature-256: sha256=HMAC of X-Shopapp-Timestamp + "." + the body with this secret. Copy it now: it is not shown again.'
             : `Current secret: ${initial.maskedSecret}. A new secret is shown only until you save.`}
         </Form.Text>
       </Form.Group>

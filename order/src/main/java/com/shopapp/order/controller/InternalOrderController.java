@@ -13,9 +13,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Service-to-service endpoints for the payment service (decisions.md 5-6): realm role SERVICE only (a
- * client-credentials token), refused by nginx and both BFFs. Replaces YAS {@code PUT /storefront/orders/status}, which
- * let any caller mark any order paid.
+ * Service-to-service endpoints for the payment service (decisions.md 5-6), refused by nginx and both BFFs; per
+ * capability realm roles of a client-credentials token (5-66): reading needs {@code SERVICE_ORDER_READ}, the payment
+ * calls {@code SERVICE_ORDER_PAYMENT} (only the payment service has them). Replaces YAS
+ * {@code PUT /storefront/orders/status}, which let any caller mark any order paid.
  */
 @RestController
 @RequiredArgsConstructor
@@ -27,6 +28,15 @@ public class InternalOrderController {
     @GetMapping("/internal/orders/{id}")
     public ResponseEntity<OrderPaymentInfoVm> getOrder(@PathVariable Long id) {
         return ResponseEntity.ok(lifecycleService.getPaymentInfo(id));
+    }
+
+    /**
+     * The payment service is about to capture money for the order (decisions.md 5-62): blocks cancelling for a short
+     * time; 400 when the order is already paid or ended.
+     */
+    @PutMapping("/internal/orders/{id}/payment-in-progress")
+    public ResponseEntity<OrderPaymentInfoVm> markPaymentInProgress(@PathVariable Long id) {
+        return ResponseEntity.ok(lifecycleService.markPaymentInProgress(id));
     }
 
     /** A completed payment: the order becomes PAID (amount checked; idempotent per payment id). */

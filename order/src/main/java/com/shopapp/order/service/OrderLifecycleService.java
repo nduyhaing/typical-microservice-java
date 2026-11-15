@@ -19,10 +19,12 @@ import com.shopapp.order.viewmodel.order.OrderDetailVm;
 import com.shopapp.order.viewmodel.order.OrderListVm;
 import com.shopapp.order.viewmodel.order.OrderStatusPutVm;
 import com.shopapp.order.viewmodel.order.OrderVm;
+import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -46,6 +48,10 @@ public class OrderLifecycleService {
     private final OrderItemRepository orderItemRepository;
     private final OrderGoodsBackService goodsBackService;
     private final TransactionTemplate transactionTemplate;
+
+    /** How long a "payment in progress" marker blocks cancelling (decisions.md 5-62). */
+    @Value("${shopapp.order.payment-in-progress-ttl:PT5M}")
+    private Duration paymentInProgressTtl = Duration.ofMinutes(5);
 
     // ---------------------------------------------------------------- admin
 
@@ -84,6 +90,10 @@ public class OrderLifecycleService {
                 throw new BadRequestException(Constants.ErrorCode.ORDER_STATUS_NOT_ALLOWED, id, from,
                     request.orderStatus());
             }
+            if (OrderTransitions.isEnded(request.orderStatus()) && paymentInProgress(order)) {
+                // a capture is running at PayPal: refused until it is recorded or the marker expires (5-62)
+                throw new BadRequestException(Constants.ErrorCode.ORDER_PAYMENT_IN_PROGRESS, id);
+            }
             moveTo(order, request.orderStatus(), request.rejectReason());
             applyDelivery(order, request.deliveryStatus(), request.deliveryMethod());
         });
@@ -110,6 +120,9 @@ public class OrderLifecycleService {
             if (!OrderTransitions.customerMayCancel(order.getOrderStatus())) {
                 throw new BadRequestException(Constants.ErrorCode.ORDER_NOT_CANCELLABLE, id, order.getOrderStatus());
             }
+            if (paymentInProgress(order)) {
+                throw new BadRequestException(Constants.ErrorCode.ORDER_PAYMENT_IN_PROGRESS, id);
+            }
             moveTo(order, OrderStatus.CANCELLED, null);
         });
         goodsBackService.giveBack(id);
@@ -123,6 +136,26 @@ public class OrderLifecycleService {
     public OrderPaymentInfoVm getPaymentInfo(Long id) {
         return OrderPaymentInfoVm.fromModel(orderRepository.findById(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.ORDER_ID_NOT_FOUND, id)));
+    }
+
+    /**
+     * The payment service is about to capture money for this order (decisions.md 5-62): refused (400) when the order
+     * is already paid or ended, else the order is marked "payment in progress" for a short time, during which the
+     * customer cannot cancel it and an admin cannot cancel or reject it. Answers the order's payment info (the amount
+     * to capture). Repeating it extends the marker.
+     */
+    public OrderPaymentInfoVm markPaymentInProgress(Long id) {
+        return transactionTemplate.execute(tx -> {
+            Order order = lockedOrder(id);
+            if (order.getPaymentStatus() == PaymentStatus.COMPLETED) {
+                throw new BadRequestException(Constants.ErrorCode.ORDER_ALREADY_PAID, id);
+            }
+            if (OrderTransitions.isEnded(order.getOrderStatus())) {
+                throw new BadRequestException(Constants.ErrorCode.ORDER_NOT_PAYABLE, id, order.getOrderStatus());
+            }
+            order.setPaymentInProgressUntil(ZonedDateTime.now().plus(paymentInProgressTtl));
+            return OrderPaymentInfoVm.fromModel(orderRepository.saveAndFlush(order));
+        });
     }
 
     /**
@@ -151,6 +184,7 @@ public class OrderLifecycleService {
             }
             order.setPaymentStatus(PaymentStatus.COMPLETED);
             order.setPaymentId(payment.paymentId());
+            order.setPaymentInProgressUntil(null);
             return OrderPaymentInfoVm.fromModel(orderRepository.saveAndFlush(order));
         });
     }
@@ -160,6 +194,11 @@ public class OrderLifecycleService {
     private Order lockedOrder(Long id) {
         return orderRepository.findWithLockById(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.ORDER_ID_NOT_FOUND, id));
+    }
+
+    private static boolean paymentInProgress(Order order) {
+        return order.getPaymentInProgressUntil() != null
+            && order.getPaymentInProgressUntil().isAfter(ZonedDateTime.now());
     }
 
     /** An allowed change: status, the payment and delivery status that follow from it, and the goods-back request. */

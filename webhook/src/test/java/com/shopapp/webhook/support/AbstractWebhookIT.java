@@ -149,10 +149,12 @@ public abstract class AbstractWebhookIT {
         return ((Number) JsonPath.read(body, "$.id")).longValue();
     }
 
-    protected static String hmac(byte[] body, String secret) throws Exception {
+    /** The expected signature of a received delivery: HMAC-SHA256 of timestamp + "." + raw body (5-69). */
+    protected static String hmac(ReceiverStub.Request request, String secret) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-        return "sha256=" + HexFormat.of().formatHex(mac.doFinal(body));
+        mac.update((request.header("X-Shopapp-Timestamp") + ".").getBytes(StandardCharsets.UTF_8));
+        return "sha256=" + HexFormat.of().formatHex(mac.doFinal(request.body()));
     }
 
     /** A delivery log row as a map (status, attempts, response_code, last_error, event_name, ...). */

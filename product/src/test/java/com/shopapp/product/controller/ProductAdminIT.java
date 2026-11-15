@@ -109,6 +109,8 @@ class ProductAdminIT extends AbstractStorefrontIT {
             .andExpect(jsonPath("$.productContent[*].slug")
                 .value(containsInAnyOrder("iphone-15", "iphone-16", "iphone-17")))
             .andExpect(jsonPath("$.productContent[?(@.slug == 'iphone-17')].isPublished").value(false))
+            // the row's own version, used by recommendation's reindex (decisions.md 5-70)
+            .andExpect(jsonPath("$.productContent[0].lastModifiedOn").isNotEmpty())
             .andExpect(jsonPath("$.totalElements").value(3));
         mockMvc.perform(get("/backoffice/products").param("brand-name", "Apple").param("pageSize", "1")
                 .param("pageNo", "1").with(admin()))

@@ -43,6 +43,11 @@ class PaypalPaymentIT extends PaymentItSupport {
         assertThat(call.authorization()).isEqualTo("Bearer " + SERVICE_TOKEN);
         assertThat(new BigDecimal(JsonPath.read(call.body(), "$.amount").toString())).isEqualByComparingTo("120.50");
         assertThat((String) JsonPath.read(call.body(), "$.reference")).isEqualTo("payment-" + paymentId);
+        // the payment's own random PayPal-Request-Id, stored with it (5-67)
+        String requestId = JsonPath.read(call.body(), "$.requestId");
+        assertThat(java.util.UUID.fromString(requestId)).isNotNull();
+        assertThat(jdbc.queryForObject("select paypal_request_id::text from payment where id = ?", String.class,
+            paymentId)).isEqualTo(requestId);
         assertThat(jdbc.queryForObject("select payment_provider_checkout_id from payment where id = ?",
             String.class, paymentId)).startsWith("PP");
         assertThat(paymentStatus(paymentId)).isEqualTo("PENDING");
@@ -75,6 +80,9 @@ class PaypalPaymentIT extends PaymentItSupport {
             .andExpect(jsonPath("$.paymentFee").value(0.71));
 
         assertThat(PAYPAL_CAPTURE_CALLS).hasSize(1);
+        // order was told a capture is starting (cancelling blocked meanwhile, 5-62) before PayPal was called
+        assertThat(ORDER_IN_PROGRESS_CALLS).singleElement()
+            .satisfies(call -> assertThat(call.method()).isEqualTo("PUT"));
         assertThat(ORDER_PAY_CALLS).hasSize(1);
         String body = ORDER_PAY_CALLS.getFirst().body();
         assertThat(new BigDecimal(JsonPath.read(body, "$.amount").toString())).isEqualByComparingTo("120.50");
@@ -201,11 +209,17 @@ class PaypalPaymentIT extends PaymentItSupport {
         order(10, "u-1", "120.50", "PENDING_PAYMENT", "PENDING");
         String token = initPaypal(10, "u-1");
 
-        mockMvc.perform(get("/cancel").param("token", token).with(customer("u-2")))
+        mockMvc.perform(json(post("/cancel"), "{\"token\":\"" + token + "\"}").with(customer("u-2")))
             .andExpect(status().isNotFound());
+        // a state change is never a GET (5-68)
         mockMvc.perform(get("/cancel").param("token", token).with(customer("u-1")))
+            .andExpect(status().is4xxClientError());
+        assertThat(paymentStatus(paymentIdOf(token))).isEqualTo("PENDING");
+        mockMvc.perform(json(post("/cancel"), "{\"token\":\"" + token + "\"}").with(customer("u-1")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.paymentStatus").value("CANCELLED"));
+        mockMvc.perform(json(post("/cancel"), "{\"token\":\"bad/token\"}").with(customer("u-1")))
+            .andExpect(status().isBadRequest());
 
         capture(token, "u-1").andExpect(status().isBadRequest());
         assertThat(PAYPAL_CAPTURE_CALLS).isEmpty();

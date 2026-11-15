@@ -43,7 +43,7 @@ class InternalStockIT extends AbstractStorefrontIT {
 
     private static RequestPostProcessor service() {
         return jwt().jwt(token -> token.subject("service-account-order-service"))
-            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
+            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE_GOODS_BACK"));
     }
 
     private Product tracked(String slug, Long quantity) {
@@ -125,6 +125,12 @@ class InternalStockIT extends AbstractStorefrontIT {
             .andExpect(status().isForbidden());
         mockMvc.perform(put(INTERNAL_RESTORE).param("reference", "order-ref-3").with(csrf()))
             .andExpect(status().isUnauthorized());
+        // another service's capability (the payment service's) and the old catch-all SERVICE role (5-66)
+        for (String role : java.util.List.of("ROLE_SERVICE_ORDER_PAYMENT", "ROLE_SERVICE")) {
+            mockMvc.perform(put(INTERNAL_RESTORE).param("reference", "order-ref-3")
+                    .with(jwt().authorities(new SimpleGrantedAuthority(role))))
+                .andExpect(status().isForbidden());
+        }
         assertThat(stockOf(phone)).isEqualTo(3);
     }
 }

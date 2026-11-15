@@ -29,6 +29,9 @@ export function getPayments(pageNo: number, filter: PaymentFilter) {
   if (filter.paymentMethod) {
     params.set('paymentMethod', filter.paymentMethod);
   }
+  if (filter.needsAttention) {
+    params.set('needsAttention', 'true');
+  }
   return get<PaymentPage>(`${base}/payments?${params}`);
 }
 

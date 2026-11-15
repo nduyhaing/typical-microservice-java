@@ -77,6 +77,13 @@ public class Order extends AbstractAuditEntity {
     @Column(name = "goods_back_requested_on")
     private ZonedDateTime goodsBackRequestedOn;
 
+    /**
+     * Until when the payment service is capturing a payment for this order (decisions.md 5-62): no customer cancel or
+     * admin cancel/reject before then; null when no capture is in progress (cleared when the order is paid).
+     */
+    @Column(name = "payment_in_progress_until")
+    private ZonedDateTime paymentInProgressUntil;
+
     /** When product gave the stock back; written only by {@code OrderRepository.markStockRestored}. */
     @Column(name = "stock_restored_on", insertable = false, updatable = false)
     private ZonedDateTime stockRestoredOn;

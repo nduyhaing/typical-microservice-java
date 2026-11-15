@@ -14,5 +14,5 @@ export const initPayment = (orderId: number, paymentMethod: string) =>
 /** PayPal's return: the server captures and verifies the payment; the browser never says "paid". */
 export const capturePayment = (token: string) => post<CaptureResult>(`${base}/capture`, { token });
 
-export const cancelPayment = (token: string) =>
-  get<CancelResult>(`${base}/cancel?token=${encodeURIComponent(token)}`);
+/** PayPal's cancel return: the buyer's pending PayPal payment is cancelled — a POST, never a GET (decisions.md 5-68). */
+export const cancelPayment = (token: string) => post<CancelResult>(`${base}/cancel`, { token });

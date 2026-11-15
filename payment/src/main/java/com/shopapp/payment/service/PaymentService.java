@@ -19,10 +19,13 @@ import com.shopapp.payment.viewmodel.payment.InitPaymentResponseVm;
 import com.shopapp.payment.viewmodel.payment.PaymentCancelVm;
 import com.shopapp.payment.viewmodel.payment.PaymentListVm;
 import com.shopapp.payment.viewmodel.payment.PaymentVm;
+import java.time.Duration;
+import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,8 +44,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  *   <li>PayPal: {@code /init} creates a PayPal order through payment-paypal and answers the approval URL;
  *       {@code /capture} captures it server-side, verifies amount, currency and references against the payment and
  *       the order ({@link CaptureVerifier}) and only then marks the order paid;</li>
- *   <li>one capture or confirmation at a time per payment (row lock); a replay answers the recorded result and never
- *       captures or pays twice; the PayPal order id and capture id are unique.</li>
+ *   <li>one init, capture or confirmation at a time per <em>order</em> (transaction-scoped advisory lock on the
+ *       order id, 5-60) plus the payment row lock; other pending attempts are cancelled by one conditional UPDATE
+ *       (only rows still PENDING), every JPA update is version-checked; a replay answers the recorded result and
+ *       never captures or pays twice; the PayPal order id and capture id are unique;</li>
+ *   <li>before capturing, order marks the order "payment in progress" so it cannot be cancelled meanwhile (5-62);
+ *       a completed payment order has not accepted yet is retried by {@link PaymentReconciler} (5-61).</li>
  * </ul>
  */
 @Slf4j
@@ -51,6 +58,8 @@ public class PaymentService {
 
     private static final Set<String> ENDED_ORDER_STATUSES = Set.of("CANCELLED", "REJECT", "REFUND");
     private static final String COMPLETED = "COMPLETED";
+    /** Longest wait between two tries of telling order about a completed payment (5-61). */
+    private static final Duration MAX_CONFIRM_DELAY = Duration.ofHours(1);
 
     private final PaymentRepository paymentRepository;
     private final PaymentProviderService providerService;
@@ -84,13 +93,15 @@ public class PaymentService {
 
     private InitPaymentResponseVm initCod(OrderPaymentInfoVm order, String customerId) {
         Payment payment = transactionTemplate.execute(tx -> {
+            lockOrder(order.id());
+            refuseWhenPaid(order.id());
             // a second "pay on delivery" for the same order (double click, back button) answers the first one
             Optional<Payment> pending = paymentRepository
                 .findByOrderIdAndPaymentStatus(order.id(), PaymentStatus.PENDING).stream()
                 .filter(existing -> existing.getPaymentMethod() == PaymentMethod.COD
                     && existing.getAmount().compareTo(order.totalPrice()) == 0)
                 .findFirst();
-            Payment cod = pending.orElseGet(() -> paymentRepository.save(newPayment(order, customerId,
+            Payment cod = pending.orElseGet(() -> paymentRepository.saveAndFlush(newPayment(order, customerId,
                 PaymentMethod.COD)));
             cancelOtherPending(order.id(), cod.getId());
             return cod;
@@ -99,20 +110,38 @@ public class PaymentService {
     }
 
     private InitPaymentResponseVm initPaypal(OrderPaymentInfoVm order, String customerId) {
-        Payment payment = paymentRepository.save(newPayment(order, customerId, PaymentMethod.PAYPAL));
+        Payment payment = transactionTemplate.execute(tx -> {
+            lockOrder(order.id());
+            refuseWhenPaid(order.id());
+            Payment attempt = newPayment(order, customerId, PaymentMethod.PAYPAL);
+            attempt.setPaypalRequestId(UUID.randomUUID());
+            return paymentRepository.saveAndFlush(attempt);
+        });
         PaypalOrderVm paypalOrder;
         try {
-            paypalOrder = paypalClient.createOrder(payment.getAmount(), payment.reference());
+            paypalOrder = paypalClient.createOrder(payment.getAmount(), payment.reference(),
+                payment.getPaypalRequestId());
         } catch (RuntimeException ex) {
-            payment.setPaymentStatus(PaymentStatus.CANCELLED);
-            payment.setFailureMessage(truncate("PayPal order not created: " + ex.getMessage()));
-            paymentRepository.save(payment);
+            transactionTemplate.executeWithoutResult(tx -> paymentRepository.findById(payment.getId())
+                .filter(stored -> stored.getPaymentStatus() == PaymentStatus.PENDING)
+                .ifPresent(stored -> {
+                    stored.setPaymentStatus(PaymentStatus.CANCELLED);
+                    stored.setFailureMessage(truncate("PayPal order not created: " + ex.getMessage()));
+                    paymentRepository.save(stored);
+                }));
             throw ex;
         }
         transactionTemplate.executeWithoutResult(tx -> {
-            payment.setPaymentProviderCheckoutId(paypalOrder.paypalOrderId());
-            paymentRepository.save(payment);
-            cancelOtherPending(order.id(), payment.getId());
+            lockOrder(order.id());
+            refuseWhenPaid(order.id());
+            Payment stored = paymentRepository.findById(payment.getId()).orElseThrow();
+            if (stored.getPaymentStatus() != PaymentStatus.PENDING) {
+                // another attempt (or a capture) for this order won while PayPal created this one (5-60)
+                throw new BadRequestException(Constants.ErrorCode.PAYMENT_REPLACED, stored.getId());
+            }
+            stored.setPaymentProviderCheckoutId(paypalOrder.paypalOrderId());
+            paymentRepository.saveAndFlush(stored);
+            cancelOtherPending(order.id(), stored.getId());
         });
         return new InitPaymentResponseVm(paypalOrder.status(), payment.getId(), paypalOrder.approvalUrl());
     }
@@ -123,7 +152,8 @@ public class PaymentService {
      */
     public CapturePaymentResponseVm capturePayment(String token) {
         Payment found = ownPaypalPayment(token, AuthenticationUtils.extractUserId());
-        CaptureOutcome outcome = transactionTemplate.execute(tx -> captureLocked(found.getId(), token));
+        CaptureOutcome outcome = transactionTemplate.execute(tx -> captureLocked(found.getOrderId(), found.getId(),
+            token));
         if (outcome.problem() != null) {
             throw new BadRequestException(Constants.ErrorCode.PAYMENT_VERIFICATION_FAILED,
                 outcome.payment().getOrderId(), outcome.problem());
@@ -135,7 +165,8 @@ public class PaymentService {
     private record CaptureOutcome(Payment payment, String problem) {
     }
 
-    private CaptureOutcome captureLocked(Long paymentId, String token) {
+    private CaptureOutcome captureLocked(Long orderId, Long paymentId, String token) {
+        lockOrder(orderId);
         Payment payment = paymentRepository.findWithLockById(paymentId)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PAYMENT_NOT_FOUND, token));
         if (payment.getPaymentStatus() == PaymentStatus.COMPLETED) {
@@ -145,8 +176,10 @@ public class PaymentService {
             throw new BadRequestException(Constants.ErrorCode.PAYMENT_NOT_CAPTURABLE, payment.getId(),
                 payment.getPaymentStatus());
         }
-        // never take the buyer's money for an order that ended or was paid otherwise meanwhile
-        OrderPaymentInfoVm order = orderClient.getOrder(payment.getOrderId());
+        refuseWhenPaid(orderId);
+        // never take the buyer's money for an order that ended or was paid otherwise meanwhile; order blocks
+        // cancelling the order while the capture runs (5-62)
+        OrderPaymentInfoVm order = orderClient.markPaymentInProgress(orderId, paymentId);
         checkPayable(order);
         PaypalCaptureVm capture = paypalClient.capture(token);
         Optional<String> problem = CaptureVerifier.problem(capture, payment, order.totalPrice());
@@ -187,7 +220,10 @@ public class PaymentService {
      * recorded amount (= the order total) and only then is the payment COMPLETED. Idempotent.
      */
     public PaymentVm confirmCod(Long paymentId) {
+        Long orderId = paymentRepository.findById(paymentId).map(Payment::getOrderId)
+            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PAYMENT_NOT_FOUND, paymentId));
         Payment confirmed = transactionTemplate.execute(tx -> {
+            lockOrder(orderId);
             Payment payment = paymentRepository.findWithLockById(paymentId)
                 .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PAYMENT_NOT_FOUND, paymentId));
             if (payment.getPaymentMethod() != PaymentMethod.COD
@@ -198,6 +234,11 @@ public class PaymentService {
             if (payment.getPaymentStatus() == PaymentStatus.COMPLETED && payment.isOrderConfirmed()) {
                 return payment;
             }
+            if (payment.getPaymentStatus() != PaymentStatus.COMPLETED
+                && paymentRepository.existsByOrderIdAndPaymentStatus(orderId, PaymentStatus.COMPLETED)) {
+                // paid by another payment (a PayPal capture) meanwhile
+                throw new BadRequestException(Constants.ErrorCode.ORDER_ALREADY_PAID, orderId);
+            }
             orderClient.markPaid(payment.getOrderId(), payment.getId(), payment.getAmount());
             payment.setPaymentStatus(PaymentStatus.COMPLETED);
             payment.setOrderConfirmed(true);
@@ -207,9 +248,10 @@ public class PaymentService {
         return PaymentVm.fromModel(confirmed);
     }
 
-    public PaymentListVm getPayments(Long orderId, PaymentStatus status, PaymentMethod method, int pageNo,
-                                     int pageSize) {
-        Page<Payment> page = paymentRepository.findAll(PaymentSpecifications.filtered(orderId, status, method),
+    public PaymentListVm getPayments(Long orderId, PaymentStatus status, PaymentMethod method, boolean needsAttention,
+                                     int pageNo, int pageSize) {
+        Page<Payment> page = paymentRepository.findAll(PaymentSpecifications.filtered(orderId, status, method,
+                needsAttention),
             PageRequest.of(pageNo, pageSize, Sort.by(Sort.Order.desc("createdOn"), Sort.Order.desc("id"))));
         List<PaymentVm> payments = page.getContent().stream().map(PaymentVm::fromModel).toList();
         return new PaymentListVm(payments, page.getNumber(), page.getSize(), page.getTotalElements(),
@@ -256,45 +298,89 @@ public class PaymentService {
             .build();
     }
 
-    /** Only the newest attempt of an order stays pending (an abandoned PayPal approval can no longer be captured). */
+    /**
+     * Only the newest attempt of an order stays pending (an abandoned PayPal approval can no longer be captured):
+     * one conditional UPDATE, so a payment completed meanwhile is never overwritten (5-60).
+     */
     private void cancelOtherPending(Long orderId, Long keepId) {
-        for (Payment other : paymentRepository.findByOrderIdAndPaymentStatus(orderId, PaymentStatus.PENDING)) {
-            if (!other.getId().equals(keepId)) {
-                other.setPaymentStatus(PaymentStatus.CANCELLED);
-                other.setFailureMessage("Replaced by payment " + keepId);
-                paymentRepository.save(other);
-            }
+        paymentRepository.cancelOtherPending(orderId, keepId, "Replaced by payment " + keepId);
+    }
+
+    /**
+     * Serialises init, capture and confirmation per order for the rest of the transaction (5-60): a
+     * transaction-scoped Postgres advisory lock on the order id (works before any payment row exists).
+     */
+    private void lockOrder(Long orderId) {
+        paymentRepository.lockOrder(orderId);
+    }
+
+    /** Under the order lock: an order with a completed payment takes no other payment. */
+    private void refuseWhenPaid(Long orderId) {
+        if (paymentRepository.existsByOrderIdAndPaymentStatus(orderId, PaymentStatus.COMPLETED)) {
+            throw new BadRequestException(Constants.ErrorCode.ORDER_ALREADY_PAID, orderId);
         }
     }
 
     /**
      * Tells order about a completed payment that order has not accepted yet. Order down: 503, the payment stays
-     * COMPLETED with {@code orderConfirmed=false} and a replayed capture tries again; order refusing (e.g. paid by
-     * another payment meanwhile): 400, recorded on the payment for a manual refund.
+     * COMPLETED with {@code orderConfirmed=false}; a replayed capture or {@link PaymentReconciler} tries again (with a
+     * back-off). Order refusing (e.g. cancelled, or paid by another payment meanwhile): 400, recorded on the payment
+     * ({@code orderRefused}) for a manual refund and no longer retried (5-61).
      */
     private Payment confirmWithOrder(Payment payment) {
         if (payment.isOrderConfirmed()) {
             return payment;
         }
+        PaymentException failure = tellOrder(payment);
+        if (failure != null) {
+            if (failure.getStatus() == HttpStatus.BAD_REQUEST) {
+                throw failure;
+            }
+            throw PaymentException.unavailable(Constants.ErrorCode.PAYMENT_NOT_RECORDED);
+        }
+        return transactionTemplate.execute(tx -> paymentRepository.findById(payment.getId()).orElseThrow());
+    }
+
+    /**
+     * The reconciler's retry (5-61): tells order about one completed, unconfirmed, not refused payment.
+     *
+     * @return whether order accepted it now
+     */
+    public boolean reconcile(Long paymentId) {
+        Payment payment = paymentRepository.findById(paymentId).orElse(null);
+        if (payment == null || payment.getPaymentStatus() != PaymentStatus.COMPLETED || payment.isOrderConfirmed()
+            || payment.isOrderRefused()) {
+            return false;
+        }
+        return tellOrder(payment) == null;
+    }
+
+    /** Marks the order paid and records the outcome on the payment; answers the failure, null on success. */
+    private PaymentException tellOrder(Payment payment) {
         try {
             orderClient.markPaid(payment.getOrderId(), payment.getId(), payment.getAmount());
         } catch (PaymentException ex) {
             if (ex.getStatus() == HttpStatus.BAD_REQUEST) {
-                transactionTemplate.executeWithoutResult(tx -> paymentRepository.findById(payment.getId())
-                    .ifPresent(stored -> {
-                        stored.setFailureMessage(truncate("Order refused the payment: " + ex.getMessage()));
-                        paymentRepository.save(stored);
-                    }));
-                throw ex;
+                log.error("Order {} refused completed payment {}: {} - refund it by hand", payment.getOrderId(),
+                    payment.getId(), ex.getMessage());
+                transactionTemplate.executeWithoutResult(tx -> paymentRepository.markOrderRefused(payment.getId(),
+                    truncate("Order refused the payment: " + ex.getMessage())));
+            } else {
+                int attempts = payment.getOrderConfirmAttempts() + 1;
+                transactionTemplate.executeWithoutResult(tx -> paymentRepository.recordConfirmFailure(
+                    payment.getId(), ZonedDateTime.now().plus(confirmRetryDelay(attempts))));
             }
-            throw PaymentException.unavailable(Constants.ErrorCode.PAYMENT_NOT_RECORDED);
+            return ex;
         }
-        return transactionTemplate.execute(tx -> {
-            Payment stored = paymentRepository.findById(payment.getId()).orElseThrow();
-            stored.setOrderConfirmed(true);
-            stored.setFailureMessage(null);
-            return paymentRepository.saveAndFlush(stored);
-        });
+        transactionTemplate.executeWithoutResult(tx -> paymentRepository.markOrderConfirmed(payment.getId()));
+        return null;
+    }
+
+    /** Wait before the next try after {@code attempts} failed tries: 30 s, doubling, at most an hour (5-61). */
+    static Duration confirmRetryDelay(int attempts) {
+        int doublings = Math.max(0, Math.min(attempts - 1, 20));
+        Duration delay = Duration.ofSeconds(30L << doublings);
+        return delay.compareTo(MAX_CONFIRM_DELAY) > 0 ? MAX_CONFIRM_DELAY : delay;
     }
 
     private static String truncate(String message) {

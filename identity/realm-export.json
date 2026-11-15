@@ -104,9 +104,36 @@
         "attributes": {}
       },
       {
-        "id": "3d80a6db-bbac-4827-b146-4a2902d1e96f",
-        "name": "SERVICE",
-        "description": "Service-to-service calls (client-credentials tokens of shop_app services, decisions.md 5-5)",
+        "id": "02a04637-463a-4049-9435-e8c248fae40f",
+        "name": "SERVICE_ORDER_READ",
+        "description": "Service capability: read an order's owner, total and payment state (order /internal/orders/{id}; payment-service only, decisions.md 5-66)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "shopapp",
+        "attributes": {}
+      },
+      {
+        "id": "550271d9-9eef-4f49-b98d-e7c31004ae15",
+        "name": "SERVICE_ORDER_PAYMENT",
+        "description": "Service capability: mark an order paid / payment in progress (order /internal/orders/{id}/payment*; payment-service only, decisions.md 5-66)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "shopapp",
+        "attributes": {}
+      },
+      {
+        "id": "35895974-a881-4659-94d7-debba7d75ce5",
+        "name": "SERVICE_GOODS_BACK",
+        "description": "Service capability: give an order's stock and coupon use back (product and promotion /internal/**; order-service only, decisions.md 5-66)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "shopapp",
+        "attributes": {}
+      },
+      {
+        "id": "194b0ce7-b2e7-46ed-b506-7c5f64b6c879",
+        "name": "SERVICE_PAYPAL",
+        "description": "Service capability: payment-paypal's internal PayPal API (payment-service only, decisions.md 5-66)",
         "composite": false,
         "clientRole": false,
         "containerId": "shopapp",
@@ -523,8 +550,7 @@
       "disableableCredentialTypes": [],
       "requiredActions": [],
       "realmRoles": [
-        "default-roles-shopapp",
-        "SERVICE"
+        "SERVICE_GOODS_BACK"
       ],
       "notBefore": 0,
       "groups": []
@@ -540,8 +566,9 @@
       "disableableCredentialTypes": [],
       "requiredActions": [],
       "realmRoles": [
-        "default-roles-shopapp",
-        "SERVICE"
+        "SERVICE_ORDER_READ",
+        "SERVICE_ORDER_PAYMENT",
+        "SERVICE_PAYPAL"
       ],
       "notBefore": 0,
       "groups": []
@@ -1183,7 +1210,7 @@
       "id": "1bb585be-530f-49ff-a033-ecd8e19e2373",
       "clientId": "order-service",
       "name": "order service (service-to-service)",
-      "description": "Client-credentials client of the order service: realm role SERVICE for product's and promotion's internal endpoints (decisions.md 5-5)",
+      "description": "Client-credentials client of the order service: realm role SERVICE_GOODS_BACK for product's and promotion's internal endpoints (decisions.md 5-5, 5-66)",
       "surrogateAuthRequired": false,
       "enabled": true,
       "alwaysDisplayInConsole": false,
@@ -1220,7 +1247,7 @@
       "id": "d018e706-537a-4cbd-9ffe-c1e73f452db3",
       "clientId": "payment-service",
       "name": "payment service (service-to-service)",
-      "description": "Client-credentials client of the payment service: realm role SERVICE for order's and payment-paypal's internal endpoints (decisions.md 5-11)",
+      "description": "Client-credentials client of the payment service: realm roles SERVICE_ORDER_READ, SERVICE_ORDER_PAYMENT and SERVICE_PAYPAL for order's and payment-paypal's internal endpoints (decisions.md 5-11, 5-66)",
       "surrogateAuthRequired": false,
       "enabled": true,
       "alwaysDisplayInConsole": false,

@@ -278,6 +278,10 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       # products-es and storefront detail (public) and the reindex list (admin's token), straight to the container
       SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+      # ONNX Runtime intra-op threads (its default is one per host core, decisions.md 5-71)
+      RECOMMENDATION_ONNX_THREADS: "2"
+    # heap 320m + metaspace + the ONNX model and its arenas (native); decisions.md 5-71
+    mem_limit: 900m
     volumes:
       - recommendation-model:/var/cache/shopapp/onnx-model
     healthcheck:

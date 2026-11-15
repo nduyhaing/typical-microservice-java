@@ -11,6 +11,7 @@ import com.jayway.jsonpath.JsonPath;
 import com.shopapp.payment.paypal.service.PaypalTokenProvider;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +29,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 @AutoConfigureMockMvc
 class PaypalOrdersTest {
 
-    private static final String CREATE = "{\"amount\":12.34,\"reference\":\"payment-7\"}";
+    private static final String REQUEST_ID = "7d0c4e9a-3f1b-4c2a-9e8d-1a2b3c4d5e6f";
+    private static final String CREATE = "{\"amount\":12.34,\"reference\":\"payment-7\",\"requestId\":\""
+        + REQUEST_ID + "\"}";
 
     @Autowired
     private MockMvc mockMvc;
@@ -53,7 +56,7 @@ class PaypalOrdersTest {
 
     static RequestPostProcessor service() {
         return jwt().jwt(token -> token.subject("service-account-payment-service"))
-            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
+            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE_PAYPAL"));
     }
 
     private org.springframework.test.web.servlet.ResultActions create(String body) throws Exception {
@@ -78,7 +81,7 @@ class PaypalOrdersTest {
 
         PaypalStub.Call call = PaypalStub.CREATE_CALLS.getFirst();
         assertThat(call.authorization()).startsWith("Bearer paypal-token-");
-        assertThat(call.requestId()).isEqualTo("create-payment-7");
+        assertThat(call.requestId()).isEqualTo(REQUEST_ID);
         assertThat((String) JsonPath.read(call.body(), "$.intent")).isEqualTo("CAPTURE");
         assertThat((String) JsonPath.read(call.body(), "$.purchase_units[0].amount.currency_code")).isEqualTo("USD");
         assertThat((String) JsonPath.read(call.body(), "$.purchase_units[0].amount.value")).isEqualTo("12.34");
@@ -92,7 +95,8 @@ class PaypalOrdersTest {
 
     @Test
     void amount_isSentWithTwoDecimals_andNeverCapped() throws Exception {
-        create("{\"amount\":2500,\"reference\":\"payment-8\"}").andExpect(status().isOk());
+        create("{\"amount\":2500,\"reference\":\"payment-8\",\"requestId\":\"" + UUID.randomUUID() + "\"}")
+            .andExpect(status().isOk());
 
         // YAS capped the PayPal amount at 1000 — a capture would then never match the order total
         assertThat((String) JsonPath.read(PaypalStub.CREATE_CALLS.getFirst().body(),
@@ -102,7 +106,8 @@ class PaypalOrdersTest {
     @Test
     void token_isCached_acrossCalls() throws Exception {
         create(CREATE).andExpect(status().isOk());
-        create("{\"amount\":1.00,\"reference\":\"payment-9\"}").andExpect(status().isOk());
+        create("{\"amount\":1.00,\"reference\":\"payment-9\",\"requestId\":\"" + UUID.randomUUID() + "\"}")
+            .andExpect(status().isOk());
         mockMvc.perform(post("/internal/orders/5O190127TN364715T/capture").with(service()))
             .andExpect(status().isOk());
 
@@ -164,6 +169,35 @@ class PaypalOrdersTest {
     }
 
     @Test
+    void capture_alreadyCapturedAtPaypal_readsThePaypalOrder_andAnswersItsCapture() throws Exception {
+        PaypalStub.CAPTURE_ANSWER.set(new PaypalStub.Answer(422, """
+            {"name":"UNPROCESSABLE_ENTITY","details":[{"issue":"ORDER_ALREADY_CAPTURED",
+             "description":"Order already captured."}],"message":"x"}"""));
+
+        mockMvc.perform(post("/internal/orders/5O190127TN364715T/capture").with(service()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.captureId").value("CAPTURE-5O190127TN364715T"))
+            .andExpect(jsonPath("$.captureStatus").value("COMPLETED"))
+            .andExpect(jsonPath("$.amount").value(12.34))
+            .andExpect(jsonPath("$.customId").value("payment-7"));
+
+        assertThat(PaypalStub.GET_CALLS).singleElement()
+            .satisfies(call -> assertThat(call.path()).isEqualTo("/v2/checkout/orders/5O190127TN364715T"));
+    }
+
+    @Test
+    void capture_alreadyCaptured_butThePaypalOrderHasNoCompletedCapture_isA400() throws Exception {
+        PaypalStub.CAPTURE_ANSWER.set(new PaypalStub.Answer(422, """
+            {"name":"UNPROCESSABLE_ENTITY","details":[{"issue":"ORDER_ALREADY_CAPTURED"}],"message":"x"}"""));
+        PaypalStub.GET_ANSWER.set(new PaypalStub.Answer(200, "{\"id\":\"5O190127TN364715T\","
+            + "\"status\":\"APPROVED\",\"purchase_units\":[{\"reference_id\":\"payment-7\"}]}"));
+
+        mockMvc.perform(post("/internal/orders/5O190127TN364715T/capture").with(service()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.title").value("ORDER_ALREADY_CAPTURED"));
+    }
+
+    @Test
     void capture_ofAnUnknownOrder_isA404() throws Exception {
         PaypalStub.CAPTURE_ANSWER.set(new PaypalStub.Answer(404, """
             {"name":"RESOURCE_NOT_FOUND","details":[{"issue":"INVALID_RESOURCE_ID"}],"message":"x"}"""));
@@ -193,6 +227,10 @@ class PaypalOrdersTest {
         create("{\"amount\":1.234,\"reference\":\"payment-7\"}").andExpect(status().isBadRequest());
         create("{\"amount\":1,\"reference\":\"\"}").andExpect(status().isBadRequest());
         create("{\"amount\":1,\"reference\":\"a/b?c\"}").andExpect(status().isBadRequest());
+        // the payment's own PayPal request id is required (5-67)
+        create("{\"amount\":1,\"reference\":\"payment-7\"}").andExpect(status().isBadRequest());
+        create("{\"amount\":1,\"reference\":\"payment-7\",\"requestId\":\"not-a-uuid\"}")
+            .andExpect(status().isBadRequest());
         mockMvc.perform(post("/internal/orders/bad%2Fid/capture").with(service()))
             .andExpect(status().is4xxClientError());
         mockMvc.perform(post("/internal/orders/" + "A".repeat(65) + "/capture").with(service()))
@@ -224,6 +262,12 @@ class PaypalOrdersTest {
             .andExpect(status().isForbidden());
         mockMvc.perform(get("/internal/status").with(jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
             .andExpect(status().isForbidden());
+        // another service's capability (the order service's) and the old catch-all SERVICE role (5-66)
+        for (String role : java.util.List.of("ROLE_SERVICE_GOODS_BACK", "ROLE_SERVICE", "ROLE_SERVICE_ORDER_PAYMENT")) {
+            mockMvc.perform(post("/internal/orders").contentType(MediaType.APPLICATION_JSON).content(CREATE)
+                    .with(jwt().authorities(new SimpleGrantedAuthority(role))))
+                .andExpect(status().isForbidden());
+        }
 
         assertThat(PaypalStub.CREATE_CALLS).isEmpty();
     }

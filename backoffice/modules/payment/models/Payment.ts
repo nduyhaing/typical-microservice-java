@@ -45,10 +45,20 @@ export type Payment = {
   failureMessage: string | null;
   /** the order service accepted the payment (order is PAID) */
   orderConfirmed: boolean;
+  /** the order service refused the completed payment: refund it by hand (decisions.md 5-61) */
+  orderRefused: boolean;
+  /** money captured that the order did not accept (yet), or a capture that failed verification (5-63) */
+  needsAttention: boolean;
   createdOn: string;
   lastModifiedOn: string;
 };
 
 export type PaymentPage = PageInfo & { payments: Payment[] };
 
-export type PaymentFilter = { orderId: string; paymentStatus: PaymentStatus | ''; paymentMethod: PaymentMethod | '' };
+export type PaymentFilter = {
+  orderId: string;
+  paymentStatus: PaymentStatus | '';
+  paymentMethod: PaymentMethod | '';
+  /** only payments that need a person (5-63) */
+  needsAttention: boolean;
+};
