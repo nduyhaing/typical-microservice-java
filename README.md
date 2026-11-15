@@ -2,6 +2,13 @@
 
 A microservices e-commerce system on Java 27 and Spring Boot 4. See `NOTICE` for third-party licenses.
 
+[![Backend CI](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/backend-ci.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/backend-ci.yml)
+[![Storefront CI](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/storefront-ci.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/storefront-ci.yml)
+[![Backoffice CI](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/backoffice-ci.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/backoffice-ci.yml)
+[![Charts CI](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/charts-ci.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/charts-ci.yml)
+[![Secret scan](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/security.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/security.yml)
+[![CodeQL](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/codeql.yml/badge.svg?branch=master)](https://github.com/nduyhaing/typical-microservice-java/actions/workflows/codeql.yml)
+
 ## Roadmap
 
 The system is built in slices; each ends in something that runs end to end.
@@ -284,6 +291,23 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
 
 Keycloak clients: `storefront-bff`, `backoffice-bff`, `customer-management` (confidential; dev secrets in
 `identity/realm-export.json`) and `swagger-ui` (public; password grant enabled for local testing).
+
+## CI
+
+GitHub Actions (`.github/workflows`), all on push and pull request to `master`:
+
+| Workflow | Runs when | What it does |
+|---|---|---|
+| **Backend CI** (`backend-ci.yml`) | a module's `src/`, `pom.xml` or `Dockerfile`, the root `pom.xml`, `checkstyle/**` or the backend CI files change | one job per touched Maven module (list read from the root pom; a change to `common-library`, the root pom, checkstyle or the CI files builds every module) running the reusable `maven-module.yml`: JDK 27 (Temurin), `mvn -pl <module> -am verify` (Checkstyle, unit tests, integration tests with Testcontainers on the runner's Docker), JaCoCo report artifact, test reports on failure |
+| **Storefront CI** / **Backoffice CI** | `storefront/**` / `backoffice/**` | reusable `node-app.yml` on Node 24: `npm ci`, lint, typecheck, test, build |
+| **Charts CI** (`charts-ci.yml`) | `k8s/**` | `helm lint` and `helm template \| kubeconform -strict -ignore-missing-schemas` for every chart in `k8s/charts` |
+| **Secret scan** (`security.yml`) | every push/PR, nightly | gitleaks over the whole history (`.gitleaks.toml`: default rules; only the three documented dev Keycloak client secrets in `.env` and the realm export are allowed) |
+| **CodeQL** (`codeql.yml`) | every push/PR except docs, weekly | Java (Maven build) and JavaScript/TypeScript code scanning |
+
+Images: on push to `master`, after the module/app checks are green, the changed services and apps are built and
+pushed to `ghcr.io/nduyhaing/shopapp-<service>:<commit sha>` and `:latest` (`GITHUB_TOKEN`; never on pull requests).
+Dependabot (`.github/dependabot.yml`) opens weekly PRs for Maven, npm, GitHub Actions and the Dockerfile base images,
+with minor and patch updates grouped. Third-party actions are pinned to commit SHAs.
 
 ## Build notes
 
