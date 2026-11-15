@@ -129,7 +129,7 @@ describe('Checkout page', () => {
     expect(screen.getByTestId('checkout-subtotal')).toHaveTextContent('$1,638.00');
     expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
     expect(orderService.previewOrder).toHaveBeenCalledWith('c-1', { shippingAddressId: 101 });
-    expect(screen.getByText('Cash on delivery')).toBeInTheDocument();
+    expect(screen.getByText(/You choose how to pay/)).toBeInTheDocument();
   });
 
   it("shows each line's amount from the server preview, never multiplied in the browser", async () => {
@@ -154,7 +154,7 @@ describe('Checkout page', () => {
     expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$0.00');
   });
 
-  it('places the order with the chosen saved address and goes to my orders', async () => {
+  it('places the order with the chosen saved address and goes to the pay step', async () => {
     vi.mocked(orderService.placeOrder).mockResolvedValue(order);
 
     render(<CheckoutPage />);
@@ -166,7 +166,7 @@ describe('Checkout page', () => {
       note: undefined,
       paymentMethod: 'COD',
     });
-    expect(push).toHaveBeenCalledWith('/my-orders?placed=7');
+    expect(push).toHaveBeenCalledWith('/checkout/pay/7');
   });
 
   it('without saved addresses, a new address from the form is priced and sent', async () => {

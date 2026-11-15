@@ -1,0 +1,19 @@
+# payment: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-payment:<tag>.
+name: payment
+kind: spring
+contextPath: /payment
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # order's internal endpoints and payment-paypal (both refused at the edge), in-cluster (decisions.md 5-11)
+  SHOPAPP_SERVICES_ORDER: http://order:8080/order
+  SHOPAPP_SERVICES_PAYMENT_PAYPAL: http://payment-paypal:8080/payment-paypal
+  # its own client-credentials token, straight to Keycloak (the token's issuer stays KEYCLOAK_URL)
+  SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
+secretEnv:
+  PAYMENT_SERVICE_CLIENT_SECRET:
+    secret: shopapp-keycloak-clients
+    key: PAYMENT_SERVICE_CLIENT_SECRET
+    optional: true

@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx webhook webhook-receiver)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx webhook webhook-receiver payment payment-paypal)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -928,17 +928,47 @@ check_rating() {
     sub=$(python -c "import base64,json,sys
 p=sys.argv[1].split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p + '=' * (-len(p) % 4)))['sub'])" \
         "$customer_token" 2>/dev/null || true)
+# Slice 5 payments (decisions.md 5-12..5-19): the customer pays the order cash on delivery through the storefront
+# BFF (a fake amount in the body is ignored: the server charges the order total), the admin confirms the cash in the
+# back office and the order becomes PAID. PayPal without credentials is not offered; payment-paypal is not reachable.
+check_cod_payment() {
+    local order_id=$1 total r payment_id amount
+    total=$(body_of "$(sf GET /api/order/storefront/orders/my-orders)" | json "next((str(o['totalPrice']) for o in d if o['id']==$order_id), '')")
+    r=$(curl -s "$(url storefront /api/payment/storefront/payment-providers)" | json "','.join(p['id'] for p in d)")
+    if [ "$r" = "COD" ]; then pass "storefront payment providers: COD only (PayPal not configured)"; else fail "storefront payment providers -> '$r' (expected COD)"; fi
+    r=$(curl -s -o /dev/null -w '%{http_code}' "$(url api /payment-paypal/internal/status)" || true)
+    if [ "$r" = "403" ]; then pass "nginx refuses /payment-paypal/ (403)"; else fail "nginx /payment-paypal/ -> $r (expected 403)"; fi
+    r=$(sf POST /api/payment/init "{\"orderId\":$order_id,\"paymentMethod\":\"PAYPAL\"}")
+    if [ "$(status_of "$r")" = "503" ]; then pass "PayPal init without credentials -> 503"; else fail "PayPal init -> $(status_of "$r") (expected 503)"; fi
+    r=$(sf POST /api/payment/init "{\"orderId\":$order_id,\"paymentMethod\":\"COD\",\"totalPrice\":0.01,\"amount\":0.01}")
+    payment_id=$(body_of "$r" | json "d['paymentId']")
+    if [ "$(status_of "$r")" != "200" ] || [ -z "$payment_id" ]; then
+        fail "customer pays order #$order_id cash on delivery -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+        return
+    fi
+    amount=$(body_of "$(bo GET "/api/payment/backoffice/payments?orderId=$order_id&paymentStatus=PENDING")" | json "next((str(p['amount']) for p in d['payments'] if p['id']==$payment_id), '')")
+    if [ -n "$amount" ] && python -c "import sys;from decimal import Decimal as D;sys.exit(0 if D(sys.argv[1])==D(sys.argv[2]) else 1)" "$amount" "$total"; then
+        pass "COD payment #$payment_id records the order total $total (the fake 0.01 in the body is ignored)"
+    else
+        fail "COD payment #$payment_id amount '$amount' (order total '$total')"
+    fi
+    r=$(bo PUT "/api/payment/backoffice/payments/$payment_id/confirm" '{}')
+    if [ "$(status_of "$r")" = "200" ]; then pass "admin confirms the cash of payment #$payment_id"; else fail "admin confirms payment #$payment_id -> $(status_of "$r") $(body_of "$r" | head -c 200)"; fi
+    r=$(body_of "$(sf GET /api/order/storefront/orders/my-orders)" | json "next((o['orderStatus']+'/'+o['paymentStatus'] for o in d if o['id']==$order_id), '')")
+    if [ "$r" = "PAID/COMPLETED" ]; then pass "order #$order_id is PAID after the COD confirmation"; else fail "order #$order_id after COD confirmation: '$r' (expected PAID/COMPLETED)"; fi
+}
+
     product_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-s24)" | json "d['id']")
     if [ -z "$sub" ] || [ -z "$product_id" ] || ! s4_customer_login || ! s4_admin_login; then
         fail "look up Galaxy S24, log the customer and the admin in (reviews)"
         return
     fi
-    # only a paid order counts as bought (5-3): the admin marks this run's Violet order paid (5-1)
+    # only a paid order counts as bought (5-3): the customer pays this run's Violet order cash on delivery and the
+    # admin confirms the cash (5-15)
     local order_id
     order_id=$(body_of "$(sf GET /api/order/storefront/orders/my-orders)" | json "next((str(o['id']) for o in d if o['orderStatus']=='PENDING_PAYMENT' and any('Violet' in i['productName'] for i in o['orderItemVms'])), '')")
     if [ -n "$order_id" ]; then
-        r=$(bo PUT "/api/order/backoffice/orders/$order_id/status" '{"orderStatus":"PAID"}')
-        if [ "$(status_of "$r")" = "200" ]; then pass "admin marks order #$order_id paid (PENDING_PAYMENT -> PAID)"; else fail "admin marks order #$order_id paid -> $(status_of "$r") $(body_of "$r" | head -c 200)"; fi
+        check_cod_payment "$order_id"
         # service-to-service endpoints never through the gateway (5-5)
         r=$(curl -s -o /dev/null -w '%{http_code}' "$(url api "/order/internal/orders/$order_id")" || true)
         if [ "$r" = "403" ]; then pass "nginx refuses /order/internal/... (403)"; else fail "nginx /order/internal/... -> $r (expected 403)"; fi

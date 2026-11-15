@@ -1,0 +1,23 @@
+# payment-paypal: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-payment-paypal:<tag>.
+name: payment-paypal
+kind: spring
+contextPath: /payment-paypal
+# no database (decisions.md 5-20)
+database:
+  enabled: false
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # PayPal sandbox; empty credentials = not configured (503, provider hidden) (decisions.md 5-23)
+  PAYPAL_BASE_URL: https://api-m.sandbox.paypal.com
+  PAYPAL_RETURN_URL: '{{ include "shopapp-service.publicUrl" (list . "storefront") }}/checkout/payment-return'
+  PAYPAL_CANCEL_URL: '{{ include "shopapp-service.publicUrl" (list . "storefront") }}/checkout/payment-return?cancelled=true'
+secretEnv:
+  PAYPAL_CLIENT_ID:
+    secret: shopapp-paypal
+    key: PAYPAL_CLIENT_ID
+    optional: true
+  PAYPAL_CLIENT_SECRET:
+    secret: shopapp-paypal
+    key: PAYPAL_CLIENT_SECRET
+    optional: true

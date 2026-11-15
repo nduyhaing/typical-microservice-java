@@ -528,6 +528,23 @@
       ],
       "notBefore": 0,
       "groups": []
+    },
+    {
+      "id": "90c53f30-fa28-4466-b454-a0de186591e6",
+      "createdTimestamp": 1794700800000,
+      "username": "service-account-payment-service",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "payment-service",
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-shopapp",
+        "SERVICE"
+      ],
+      "notBefore": 0,
+      "groups": []
     }
   ],
   "scopeMappings": [
@@ -1172,6 +1189,43 @@
       "alwaysDisplayInConsole": false,
       "clientAuthenticatorType": "client-secret",
       "secret": "CwC9Dta2j86T39tYOC3iJyJCx-EfkJSB",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300",
+        "client_credentials.use_refresh_token": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "display.on.consent.screen": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "id": "d018e706-537a-4cbd-9ffe-c1e73f452db3",
+      "clientId": "payment-service",
+      "name": "payment service (service-to-service)",
+      "description": "Client-credentials client of the payment service: realm role SERVICE for order's and payment-paypal's internal endpoints (decisions.md 5-11)",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "wzZ7vmYaPO4WfwUlUxHIPPXR6hPqSEyX",
       "redirectUris": [],
       "webOrigins": [],
       "notBefore": 0,

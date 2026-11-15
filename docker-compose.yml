@@ -535,6 +535,54 @@ services:
     networks:
       - shopapp-network
 
+  # payments (decisions.md 5-10..5-19): COD (admin-confirmed) and PayPal; the amount always comes from order's
+  # internal endpoint, called with payment's own client-credentials token. nginx does not wait for it
+  payment:
+    build: ./payment
+    image: shopapp/payment:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/payment
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # internal endpoints (refused at the edge), straight to the containers
+      SHOPAPP_SERVICES_ORDER: http://order:8080/order
+      SHOPAPP_SERVICES_PAYMENT_PAYPAL: http://payment-paypal:8080/payment-paypal
+      SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
+      PAYMENT_SERVICE_CLIENT_SECRET: ${PAYMENT_SERVICE_CLIENT_SECRET}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /payment/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # PayPal Orders v2 adapter, internal only (no nginx location; /payment-paypal/ is refused at the edge). Empty
+  # PAYPAL_CLIENT_ID/SECRET = not configured: it answers 503 and the PayPal provider is hidden (decisions.md 5-20..5-29)
+  payment-paypal:
+    build: ./payment-paypal
+    image: shopapp/payment-paypal:dev
+    environment:
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      PAYPAL_BASE_URL: ${PAYPAL_BASE_URL:-https://api-m.sandbox.paypal.com}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      PAYPAL_RETURN_URL: http://storefront.${DOMAIN}:${NGINX_HTTP_PORT}/checkout/payment-return
+      PAYPAL_CANCEL_URL: http://storefront.${DOMAIN}:${NGINX_HTTP_PORT}/checkout/payment-return?cancelled=true
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /payment-paypal/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - shopapp-network
+
   # webhooks (decisions.md 5-30..5-39): admin-registered URLs get signed product/order events from the CDC topics.
   # Private/loopback addresses are refused except the hosts in WEBHOOK_ALLOWED_HOSTS (the smoke's receiver below);
   # nginx does not wait for this service

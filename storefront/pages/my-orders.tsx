@@ -13,6 +13,7 @@ import { ApiError } from '../common/services/ApiClientService';
 import { formatPrice } from '../common/utils/format';
 import { LOGIN_URL } from '../modules/auth/services/AuthenticationService';
 import { Order, orderStatusLabel } from '../modules/order/models/Order';
+import { paymentStatusLabel } from '../modules/payment/models/Payment';
 import { cancelOrder, getMyOrders } from '../modules/order/services/OrderService';
 
 const CANCEL_FAILED = 'The order could not be cancelled right now. Please try again.';
@@ -26,6 +27,11 @@ function cancelError(error: unknown): string {
     }
   }
   return CANCEL_FAILED;
+}
+
+/** Not paid yet and still open: the customer can (re)start paying it (decisions.md 5-19). */
+function isPayable(order: Order): boolean {
+  return order.paymentStatus === 'PENDING' && ['PENDING', 'PENDING_PAYMENT', 'ACCEPTED'].includes(order.orderStatus);
 }
 
 /** Badge colour per status. */
@@ -114,6 +120,14 @@ export default function MyOrdersPage() {
             <div className="text-end fw-bold" data-testid={`order-total-${order.id}`}>
               {formatPrice(order.totalPrice)}
             </div>
+            <div className="text-end small text-muted">Payment: {paymentStatusLabel(order.paymentStatus)}</div>
+            {isPayable(order) && (
+              <div className="text-end mt-2">
+                <Link href={`/checkout/pay/${order.id}`} className="btn btn-sm btn-primary">
+                  Pay now
+                </Link>
+              </div>
+            )}
             {order.cancellable && (
               <div className="text-end mt-2">
                 <Button size="sm" variant="outline-danger" disabled={cancelling === order.id} onClick={() => cancel(order)}>

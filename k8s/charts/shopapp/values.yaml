@@ -36,7 +36,7 @@ ingress:
   uploadBodySize: 11m
   # services routed on api.<domain> as /<service>/ (only the enabled ones are rendered)
   apiServices: [product, cart, customer, order, media, tax, location, inventory, promotion, rating, search,
-                recommendation, sampledata, webhook]
+                recommendation, sampledata, webhook, payment]
   # Keycloak (k8s/deploy/keycloak.yaml) behind identity.<domain>
   identity:
     enabled: true
@@ -91,6 +91,11 @@ recommendation:
 sampledata:
   enabled: true
 webhook:
+  enabled: true
+payment:
+  enabled: true
+# internal only: no ingress path (decisions.md 5-22)
+payment-paypal:
   enabled: true
 storefront-bff:
   enabled: true

@@ -69,6 +69,14 @@ dependencies:
     version: 0.1.0
     repository: file://../webhook
     condition: webhook.enabled
+  - name: payment
+    version: 0.1.0
+    repository: file://../payment
+    condition: payment.enabled
+  - name: payment-paypal
+    version: 0.1.0
+    repository: file://../payment-paypal
+    condition: payment-paypal.enabled
   - name: storefront-bff
     version: 0.1.0
     repository: file://../storefront-bff

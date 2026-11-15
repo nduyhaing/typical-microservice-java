@@ -75,7 +75,8 @@ type SubmitError = { kind: 'retry' | 'login' | 'ordered' } | { kind: 'refused' |
  * Checkout (slice 3c): items, a saved address (default preselected) or a new one, and the subtotal, tax and total
  * priced by the order service for that address — refreshed when the address changes; the browser never computes
  * tax (decisions.md 3c-46, 3c-48). A coupon code is applied by asking the server for a new preview with it; the
- * summary then shows the discount and the order is placed with the code (4-56). Cash on delivery (payments: slice 5).
+ * summary then shows the discount and the order is placed with the code (4-56). Payment is the next step
+ * (/checkout/pay/[orderId], decisions.md 5-19).
  */
 export default function CheckoutPage() {
   const router = useRouter();
@@ -151,7 +152,8 @@ export default function CheckoutPage() {
         paymentMethod: 'COD',
         ...(appliedCode ? { couponCode: appliedCode } : {}),
       });
-      await router.push(`/my-orders?placed=${order.id}`);
+      // the pay step: cash on delivery or PayPal (decisions.md 5-19)
+      await router.push(`/checkout/pay/${order.id}`);
     } catch (error) {
       // only suggest retrying when a retry can succeed
       const detail = detailOf(error);
@@ -210,8 +212,7 @@ export default function CheckoutPage() {
                 onChange={(event) => setNote(event.target.value)}
               />
             </Form.Group>
-            <h2 className="h5">Payment</h2>
-            <p>Cash on delivery</p>
+            <p className="small text-muted">You choose how to pay (cash on delivery or PayPal) after placing the order.</p>
             {submitError?.kind === 'retry' && (
               <Alert variant="danger">Your order could not be placed. Please try again.</Alert>
             )}

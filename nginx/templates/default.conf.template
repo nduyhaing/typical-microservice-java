@@ -212,6 +212,26 @@ server {
     }
 
     # admin-only sample data loader; nginx does not wait for it (a dev convenience, decisions.md 5-50)
+    # payments (customer init/capture/cancel, public provider list, admin providers and payments); nginx does not
+    # wait for it: the storefront's pay step says payments are unavailable when it is down (decisions.md 5-18)
+    location /payment/ {
+        set $upstream_payment payment:8080;
+        proxy_pass http://$upstream_payment;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
+    # payment-paypal is internal only (the payment service calls it on the network with its SERVICE token): never
+    # through the gateway (decisions.md 5-22)
+    location /payment-paypal/ {
+        default_type application/json;
+        return 403 '{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}';
+    }
+
     location /sampledata/ {
         set $upstream_sampledata sampledata:8080;
         proxy_pass http://$upstream_sampledata;

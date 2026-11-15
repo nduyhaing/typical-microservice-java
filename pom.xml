@@ -35,6 +35,8 @@
         <module>sampledata</module>
         <module>recommendation</module>
         <module>webhook</module>
+        <module>payment</module>
+        <module>payment-paypal</module>
     </modules>
 
     <properties>

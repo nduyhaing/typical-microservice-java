@@ -267,6 +267,32 @@ dbproduct.public.product / dborder.public.order --group "webhook"--> webhook --l
   register `http://webhook-receiver:8080/anything`, then `docker compose logs -f webhook-receiver`.
 - The secret is shown once (when you create or regenerate it); the API only returns its last four characters.
 
+## Payments
+
+Customers pay an order cash on delivery or with PayPal (payment + payment-paypal services, `decisions.md`
+5-10..5-26). After **Place order** the storefront opens the pay step `/checkout/pay/{orderId}` (also "Pay now" on My
+orders).
+
+```
+storefront --POST /payment/init {orderId, method}--> payment --GET /internal/orders/{id} (SERVICE token)--> order
+                                                       \--PAYPAL--> payment-paypal --Orders v2--> PayPal (approval URL)
+PayPal --redirect ?token=--> /checkout/payment-return --POST /payment/capture--> payment --capture + verify--> PUT order /internal/orders/{id}/payment
+```
+
+- **The amount always comes from the order service**, never from the browser; a customer can only pay their own
+  order (someone else's is 404); paid, cancelled, rejected or refunded orders are refused.
+- **Cash on delivery**: the pay step records a pending payment ("Order placed — pay on delivery"). When the cash is
+  collected, an admin clicks **Confirm cash received** in the back office (**Sales → Payments**); the order becomes
+  PAID and the customer can review its products.
+- **PayPal (sandbox)**: off by default — with empty `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` in `.env` the PayPal
+  provider is hidden and its endpoints answer 503. To try it, create a sandbox REST app at developer.paypal.com, put
+  its client id and secret in `.env` and `docker compose up -d payment-paypal`. The capture is verified server-side
+  (USD, the exact order total, our reference) before the order is marked paid; a replayed return page never pays twice.
+- payment-paypal is internal only (nginx and the BFFs refuse `/payment-paypal/`). The payment service has its own
+  Keycloak client `payment-service` (realm role SERVICE); on a Keycloak volume created before slice 5 run
+  `bash identity/scripts/apply-service-client.sh payment-service PAYMENT_SERVICE_CLIENT_SECRET` once.
+- Back office: **Sales → Payment providers** (enable, disable, rename; "Not configured" for PayPal without credentials).
+
 ## Reviews
 
 Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).
@@ -339,6 +365,7 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
 | Storefront search page | http://storefront.shopapp.local/search?keyword=galaxy | public (header search box with suggestions) |
 | Recommendation API | http://api.shopapp.local/recommendation/embedding/product/{id}/similarity | public; `POST /recommendation/backoffice/reindex` needs ADMIN |
 | Webhook API / test receiver | http://api.shopapp.local/webhook/backoffice/webhooks, `docker compose logs webhook-receiver` | ADMIN; back office System → Webhooks |
+| Payment API | http://api.shopapp.local/payment/storefront/payment-providers, .../payment/init, .../payment/capture, .../payment/backoffice/payments | provider list public; init/capture/cancel CUSTOMER; `backoffice` ADMIN; back office Sales → Payments, Payment providers |
 | Rating API | http://api.shopapp.local/rating/storefront/ratings/products/{productId}, .../rating/storefront/ratings/product/{productId}/average-star, .../rating/backoffice/ratings | lists and averages public; posting/deleting own reviews needs CUSTOMER; `backoffice` ADMIN |
 | Promotion API | http://api.shopapp.local/promotion/backoffice/promotions, .../promotion/storefront/promotions/verify | `backoffice` ADMIN; `storefront` any logged-in user (order calls it with the customer's token) |
 | Back office: reviews, promotions | http://backoffice.shopapp.local/reviews, /promotion/manager-promotion | `admin` / `admin` |

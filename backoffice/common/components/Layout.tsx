@@ -32,6 +32,16 @@ export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
         label: 'Orders',
         description: 'Orders: search, see the details, move them through payment, shipping, cancel or refund.',
       },
+      {
+        href: '/sales/payments',
+        label: 'Payments',
+        description: 'Payments of orders: filter, and confirm cash collected on delivery.',
+      },
+      {
+        href: '/sales/payment-providers',
+        label: 'Payment providers',
+        description: 'Cash on delivery and PayPal: enable, disable or rename them.',
+      },
     ],
   },
   {
