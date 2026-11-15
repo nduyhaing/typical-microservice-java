@@ -33,6 +33,8 @@ export type Order = {
   paymentMethod: string;
   createdOn: string;
   orderItemVms: OrderItem[];
+  /** Whether the customer may still cancel it (pending / pending payment), decided by the order service. */
+  cancellable?: boolean;
 };
 
 /** What the browser sends to place an order: no prices, tax or totals (decisions.md 2c-1). */

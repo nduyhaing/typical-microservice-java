@@ -19,4 +19,10 @@ public interface PromotionUsageRepository extends JpaRepository<PromotionUsage, 
     @Query(value = "UPDATE promotion_usage SET released_on = now() WHERE reference = :reference "
         + "AND user_id = :userId AND released_on IS NULL", nativeQuery = true)
     int release(@Param("reference") UUID reference, @Param("userId") String userId);
+
+    /** Marks the use as released whoever took it (internal, decisions.md 5-5); returns the rows changed (0 or 1). */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "UPDATE promotion_usage SET released_on = now() WHERE reference = :reference "
+        + "AND released_on IS NULL", nativeQuery = true)
+    int releaseOfAnyUser(@Param("reference") UUID reference);
 }

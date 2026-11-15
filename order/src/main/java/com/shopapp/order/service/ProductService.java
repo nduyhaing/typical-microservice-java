@@ -36,9 +36,11 @@ public class ProductService {
         new ParameterizedTypeReference<>() { };
 
     private final RestClient restClient;
+    private final ServiceTokenProvider serviceTokens;
 
-    public ProductService(OrderServiceUrls urls) {
+    public ProductService(OrderServiceUrls urls, ServiceTokenProvider serviceTokens) {
         this.restClient = RestClients.withTimeouts(urls.product());
+        this.serviceTokens = serviceTokens;
     }
 
     public Map<Long, ProductCheckoutListVm> getOrderableProducts(Collection<Long> ids) {
@@ -132,6 +134,21 @@ public class ProductService {
             log.error("Could not give back the stock of failed order attempt {}: {}", reservation.reference(),
                 ex.getMessage());
         }
+    }
+
+    /**
+     * Gives back the stock a placed order took under its stored reference, through product's internal endpoint with
+     * the order service's own token (decisions.md 5-4, 5-5): it works whoever cancels (the customer, an admin, the
+     * retry sweep), product gives the units back at most once per reference.
+     *
+     * @return whether product confirmed (2xx); false when it is down or refused, so the caller retries later
+     */
+    public boolean restoreOrderStock(Long orderId, String reference) {
+        return InternalCalls.send(serviceTokens, "restore the stock of order " + orderId, token -> restClient.put()
+            .uri(uri -> uri.path("/internal/products/restore-quantity").queryParam("reference", reference).build())
+            .headers(headers -> headers.setBearerAuth(token))
+            .retrieve()
+            .toBodilessEntity());
     }
 
     private static RemoteErrorVm errorBody(HttpClientErrorException ex) {

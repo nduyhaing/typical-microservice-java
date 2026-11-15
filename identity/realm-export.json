@@ -102,6 +102,15 @@
         "clientRole": false,
         "containerId": "shopapp",
         "attributes": {}
+      },
+      {
+        "id": "3d80a6db-bbac-4827-b146-4a2902d1e96f",
+        "name": "SERVICE",
+        "description": "Service-to-service calls (client-credentials tokens of shop_app services, decisions.md 5-5)",
+        "composite": false,
+        "clientRole": false,
+        "containerId": "shopapp",
+        "attributes": {}
       }
     ],
     "client": {
@@ -500,6 +509,23 @@
           "uma_protection"
         ]
       },
+      "notBefore": 0,
+      "groups": []
+    },
+    {
+      "id": "30099418-bce5-4338-8e5e-22ce37159edb",
+      "createdTimestamp": 1794700800000,
+      "username": "service-account-order-service",
+      "enabled": true,
+      "totp": false,
+      "emailVerified": false,
+      "serviceAccountClientId": "order-service",
+      "disableableCredentialTypes": [],
+      "requiredActions": [],
+      "realmRoles": [
+        "default-roles-shopapp",
+        "SERVICE"
+      ],
       "notBefore": 0,
       "groups": []
     }
@@ -1135,6 +1161,43 @@
         "scopes": [],
         "decisionStrategy": "UNANIMOUS"
       }
+    },
+    {
+      "id": "1bb585be-530f-49ff-a033-ecd8e19e2373",
+      "clientId": "order-service",
+      "name": "order service (service-to-service)",
+      "description": "Client-credentials client of the order service: realm role SERVICE for product's and promotion's internal endpoints (decisions.md 5-5)",
+      "surrogateAuthRequired": false,
+      "enabled": true,
+      "alwaysDisplayInConsole": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CwC9Dta2j86T39tYOC3iJyJCx-EfkJSB",
+      "redirectUris": [],
+      "webOrigins": [],
+      "notBefore": 0,
+      "bearerOnly": false,
+      "consentRequired": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "frontchannelLogout": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300",
+        "client_credentials.use_refresh_token": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "display.on.consent.screen": "false"
+      },
+      "authenticationFlowBindingOverrides": {},
+      "fullScopeAllowed": true,
+      "nodeReRegistrationTimeout": -1,
+      "defaultClientScopes": [
+        "roles"
+      ],
+      "optionalClientScopes": []
     },
     {
       "id": "ce61ec4b-d4c5-477b-91c0-ebf1fd189bbd",

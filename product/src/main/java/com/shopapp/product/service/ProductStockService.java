@@ -127,6 +127,19 @@ public class ProductStockService {
         stockReservationRepository.deleteAll(reservations);
     }
 
+    /**
+     * Internal (order service, realm role SERVICE; decisions.md 5-5): gives back the units taken under
+     * {@code reference} whoever took them, once, like {@link #restoreStockQuantity(String)}; the order's admin or the
+     * retry job can give back what the customer's token took.
+     */
+    @Transactional
+    public void restoreStockQuantityOfAnyCaller(String reference) {
+        List<StockReservation> reservations = stockReservationRepository.findByReferenceOrderByProductIdAsc(reference);
+        reservations.forEach(reservation ->
+            productRepository.addStock(reservation.getProductId(), reservation.getQuantity()));
+        stockReservationRepository.deleteAll(reservations);
+    }
+
     @Transactional(readOnly = true)
     public List<ProductInfoVm> getProductsForWarehouse(String name, String sku, List<Long> productIds,
                                                        FilterExistInWhSelection selection) {

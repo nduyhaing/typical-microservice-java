@@ -55,6 +55,15 @@ class GatewayRoutesTest {
         "/api/promotion/storefront/promotions/apply%2Dusage?reference=r-1",
         "/api/promotion/storefront/promotions/release-usage/");
 
+    /** Service-to-service endpoints (realm role SERVICE): reachable inside the compose network only (5-5). */
+    private static final List<String> INTERNAL = List.of(
+        "/api/order/internal/orders/1/payment",
+        "/api/order/internal/orders/1",
+        "/api/product/internal/products/restore-quantity?reference=r-1",
+        "/api/promotion/internal/promotions/release-usage?reference=" + java.util.UUID.randomUUID(),
+        "/api/order/%69nternal/orders/1/payment",
+        "/api/payment/internal/");
+
     @Autowired
     private WebTestClient client;
 
@@ -143,6 +152,17 @@ class GatewayRoutesTest {
             admin().post().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("{\"couponCode\":\"SAVE10\"}").exchange()
                 .expectStatus().isForbidden();
+        }
+        assertThat(API_PATH.get()).isNull();
+    }
+
+    @Test
+    void internalEndpoints_areRefused_evenForAnAdmin() {
+        for (String path : INTERNAL) {
+            admin().put().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"paymentId\":1,\"amount\":1}").exchange()
+                .expectStatus().isForbidden();
+            admin().get().uri(URI.create(path)).exchange().expectStatus().isForbidden();
         }
         assertThat(API_PATH.get()).isNull();
     }

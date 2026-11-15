@@ -33,6 +33,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.PUT, "/backoffice/products/subtract-quantity",
                     "/backoffice/products/restore-quantity").authenticated()
                 .requestMatchers("/backoffice/**").hasRole("ADMIN")
+                // order service only, with its client-credentials token; also refused at the edge (5-5)
+                .requestMatchers("/internal/**").hasRole("SERVICE")
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .build();

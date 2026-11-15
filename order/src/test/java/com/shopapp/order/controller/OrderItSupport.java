@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jayway.jsonpath.JsonPath;
 import com.shopapp.order.PostgresContainerSupport;
+import com.shopapp.order.service.ServiceTokenProvider;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -76,6 +78,15 @@ abstract class OrderItSupport {
     static final List<Call> VERIFY_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> APPLY_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> RELEASE_CALLS = new CopyOnWriteArrayList<>();
+    /** Internal (service token) stock restore and coupon release that give a cancelled order's goods back (5-4). */
+    static final List<Call> INTERNAL_RESTORE_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> INTERNAL_RELEASE_CALLS = new CopyOnWriteArrayList<>();
+    static final AtomicInteger INTERNAL_RESTORE_STATUS = new AtomicInteger(204);
+    static final AtomicInteger INTERNAL_RELEASE_STATUS = new AtomicInteger(204);
+    /** Client-credentials token requests to the stubbed Keycloak, and the status it answers. */
+    static final List<Call> TOKEN_CALLS = new CopyOnWriteArrayList<>();
+    static final AtomicInteger TOKEN_STATUS = new AtomicInteger(200);
+    static final String SERVICE_TOKEN = "service-token-order";
     static final HttpServer BACKENDS = backends();
 
     /** A stubbed answer. */
@@ -132,6 +143,9 @@ abstract class OrderItSupport {
     @Autowired
     JdbcTemplate jdbc;
 
+    @Autowired
+    ServiceTokenProvider serviceTokens;
+
     private static HttpServer backends() {
         try {
             HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -170,6 +184,21 @@ abstract class OrderItSupport {
             server.createContext("/product/backoffice/products/restore-quantity", exchange -> {
                 RESTORE_CALLS.add(record(exchange));
                 respond(exchange, 204, "");
+            });
+            server.createContext("/product/internal/products/restore-quantity", exchange -> {
+                INTERNAL_RESTORE_CALLS.add(record(exchange));
+                respond(exchange, INTERNAL_RESTORE_STATUS.get(), "");
+            });
+            server.createContext("/promotion/internal/promotions/release-usage", exchange -> {
+                INTERNAL_RELEASE_CALLS.add(record(exchange));
+                respond(exchange, INTERNAL_RELEASE_STATUS.get(), "");
+            });
+            server.createContext("/identity/token", exchange -> {
+                TOKEN_CALLS.add(record(exchange));
+                int status = TOKEN_STATUS.get();
+                respond(exchange, status, status == 200
+                    ? "{\"access_token\":\"" + SERVICE_TOKEN + "\",\"expires_in\":300,\"token_type\":\"Bearer\"}"
+                    : "{\"error\":\"unauthorized_client\"}");
             });
             server.createContext("/cart/storefront/cart/items/remove", exchange -> {
                 Call call = record(exchange);
@@ -276,6 +305,11 @@ abstract class OrderItSupport {
         registry.add("shopapp.services.tax", () -> base + "/tax");
         registry.add("shopapp.services.location", () -> base + "/location");
         registry.add("shopapp.services.promotion", () -> base + "/promotion");
+        registry.add("shopapp.service-auth.token-uri", () -> base + "/identity/token");
+        registry.add("shopapp.service-auth.client-id", () -> "order-service");
+        registry.add("shopapp.service-auth.client-secret", () -> "order-secret");
+        // the retry sweep stays out of the way; tests call it directly
+        registry.add("shopapp.order.goods-back-retry", () -> "PT10H");
     }
 
     // BACKENDS is shared by every IT class of this JVM (one Spring context); the JVM exit stops it
@@ -300,11 +334,29 @@ abstract class OrderItSupport {
         VERIFY_CALLS.clear();
         APPLY_CALLS.clear();
         RELEASE_CALLS.clear();
+        INTERNAL_RESTORE_CALLS.clear();
+        INTERNAL_RELEASE_CALLS.clear();
+        INTERNAL_RESTORE_STATUS.set(204);
+        INTERNAL_RELEASE_STATUS.set(204);
+        TOKEN_CALLS.clear();
+        TOKEN_STATUS.set(200);
+        serviceTokens.evict();
         jdbc.execute("TRUNCATE order_item, \"order\", order_address, checkout_item, checkout RESTART IDENTITY CASCADE");
     }
 
     static RequestPostProcessor customer(String id) {
         return jwt().jwt(token -> token.subject(id).claim("email", id + "@shopapp.local").tokenValue("token-" + id));
+    }
+
+    static RequestPostProcessor admin() {
+        return jwt().jwt(token -> token.subject("admin-1").tokenValue("token-admin"))
+            .authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
+    }
+
+    /** The payment service's client-credentials token (realm role SERVICE). */
+    static RequestPostProcessor service() {
+        return jwt().jwt(token -> token.subject("service-account-payment").tokenValue("token-service"))
+            .authorities(new SimpleGrantedAuthority("ROLE_SERVICE"));
     }
 
     static MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder request, String body) {
@@ -334,6 +386,14 @@ abstract class OrderItSupport {
     MockHttpServletRequestBuilder placeOrderWithSavedAddress(String checkoutId, long addressId) {
         return json(post("/storefront/orders"), "{\"checkoutId\":\"" + checkoutId + "\",\"shippingAddressId\":"
             + addressId + ",\"paymentMethod\":\"COD\"}");
+    }
+
+    /** Places an order for the customer and answers its id. */
+    long placedOrder(String customer, String items, String extra) throws Exception {
+        String response = mockMvc.perform(placeOrder(createCheckout(customer, items), extra).with(customer(customer)))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+        return ((Number) JsonPath.read(response, "$.id")).longValue();
     }
 
     long orderCount() {

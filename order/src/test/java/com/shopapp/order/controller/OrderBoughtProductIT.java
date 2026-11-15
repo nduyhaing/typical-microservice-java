@@ -5,18 +5,21 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.ResultActions;
 
 /**
  * YAS GET /storefront/orders/completed?productId=: did the caller buy the product (or one of its variations)? Used by
- * the rating service before a customer may review a product (decisions.md 4-30).
+ * the rating service before a customer may review a product (decisions.md 4-30): only a PAID, SHIPPING or COMPLETED
+ * order counts (5-3).
  */
 class OrderBoughtProductIT extends OrderItSupport {
 
+    /** A paid order (placed orders are PENDING_PAYMENT until payment). */
     private void order(String customer, String items) throws Exception {
-        String checkoutId = createCheckout(customer, items);
-        mockMvc.perform(placeOrder(checkoutId, "").with(customer(customer))).andExpect(status().isOk());
+        long id = placedOrder(customer, items, "");
+        jdbc.update("update \"order\" set status = 'PAID' where id = ?", id);
     }
 
     private ResultActions bought(String customer, long productId) throws Exception {
@@ -47,18 +50,25 @@ class OrderBoughtProductIT extends OrderItSupport {
     }
 
     @Test
-    void cancelledOrRejectedOrder_doesNotCount() throws Exception {
+    void onlyPaidShippingOrCompletedOrders_count() throws Exception {
         order("u-1", "[{\"productId\":25,\"quantity\":1}]");
 
-        jdbc.update("update \"order\" set status = 'CANCELLED'");
+        for (String status : List.of("PAID", "SHIPPING", "COMPLETED")) {
+            jdbc.update("update \"order\" set status = ?", status);
+            bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(true));
+        }
+        // placed but not paid (4-30's interim rule counted these), accepted cash on delivery, or ended
+        for (String status : List.of("PENDING", "PENDING_PAYMENT", "ACCEPTED", "CANCELLED", "REJECT", "REFUND")) {
+            jdbc.update("update \"order\" set status = ?", status);
+            bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(false));
+        }
+    }
+
+    @Test
+    void justPlacedOrder_doesNotCountUntilPaid() throws Exception {
+        placedOrder("u-1", "[{\"productId\":25,\"quantity\":1}]", "");
+
         bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(false));
-        jdbc.update("update \"order\" set status = 'REJECT'");
-        bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(false));
-        // shop_app orders stay PENDING_PAYMENT until payment (slice 5): placed counts as bought for now
-        jdbc.update("update \"order\" set status = 'PENDING_PAYMENT'");
-        bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(true));
-        jdbc.update("update \"order\" set status = 'COMPLETED'");
-        bought("u-1", 25).andExpect(jsonPath("$.isPresent").value(true));
     }
 
     @Test

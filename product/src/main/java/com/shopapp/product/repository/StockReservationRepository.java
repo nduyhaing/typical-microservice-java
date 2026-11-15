@@ -15,4 +15,8 @@ public interface StockReservationRepository extends JpaRepository<StockReservati
     /** Locked, so two concurrent restores of the same reference cannot both give the units back. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<StockReservation> findByReferenceAndOwnerOrderByProductIdAsc(String reference, String owner);
+
+    /** Every caller's reservation rows of the reference, locked (internal restore, decisions.md 5-5). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    List<StockReservation> findByReferenceOrderByProductIdAsc(String reference);
 }

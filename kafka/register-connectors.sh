@@ -11,7 +11,7 @@ set -eu
 CONNECT_URL="${CONNECT_URL:-http://kafka-connect:8083}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-30}"
 DIR="$(dirname "$0")/connects"
-CONNECTORS="product-connector:debezium-product.json"
+CONNECTORS="product-connector:debezium-product.json order-connector:debezium-order.json"
 
 trap 'exit 0' TERM INT
 

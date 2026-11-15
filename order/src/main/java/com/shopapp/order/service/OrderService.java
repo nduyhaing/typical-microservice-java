@@ -27,7 +27,6 @@ import com.shopapp.order.viewmodel.order.OrderPreviewPostVm;
 import com.shopapp.order.viewmodel.order.OrderPreviewVm;
 import com.shopapp.order.viewmodel.order.OrderVm;
 import java.math.BigDecimal;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -49,7 +48,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * ids, taxed per line from the tax service, stock taken from product before the order is committed and given back
  * when the commit fails (3c-41..45). Slice 4: an optional coupon verified with promotion discounts the eligible lines
  * (tax on the discounted amounts) and takes one use from promotion before the commit, given back when the commit
- * fails (4-50..4-55). Status PENDING_PAYMENT; no delivery fee or payment yet.
+ * fails (4-50..4-55). Status PENDING_PAYMENT, no
+ * delivery fee; the lifecycle after placing is in {@link OrderLifecycleService} (slice 5).
  *
  * <p>Place order runs in two phases. Outside any transaction: check the checkout, resolve the address (location),
  * get the tax rates (tax), verify the coupon (promotion) and price it. Then one transaction: lock the checkout row,
@@ -141,11 +141,11 @@ public class OrderService {
             // one use, counted atomically by promotion; used up meanwhile -> 400, the stock is given back (4-53)
             promotionService.applyUsage(usage, pricing.coupon());
         }
-        return saveOrder(checkout, orderPostVm, shipping, billing, pricing, usage);
+        return saveOrder(checkout, orderPostVm, shipping, billing, pricing, reservation, usage);
     }
 
     private OrderVm saveOrder(Checkout checkout, OrderPostVm orderPostVm, OrderAddress shipping, OrderAddress billing,
-                              OrderPricing pricing, CouponUsage usage) {
+                              OrderPricing pricing, StockReservation reservation, CouponUsage usage) {
         List<CheckoutItem> checkoutItems = checkout.getCheckoutItems();
         Order order = orderRepository.save(Order.builder()
             .customerId(checkout.getCustomerId())
@@ -160,6 +160,8 @@ public class OrderService {
             .discount(pricing.discount())
             .couponCode(pricing.couponCode())
             .promotionUsageReference(usage == null ? null : usage.reference())
+            // kept so a cancellation can give the units back (5-2)
+            .stockReference(reservation.reference())
             .deliveryFee(BigDecimal.ZERO)
             .orderStatus(OrderStatus.PENDING_PAYMENT)
             .paymentStatus(PaymentStatus.PENDING)
@@ -247,16 +249,9 @@ public class OrderService {
     }
 
     /**
-     * Statuses in which a customer counts as having bought the order's products (decisions.md 4-30). YAS: COMPLETED
-     * only; shop_app orders stay PENDING_PAYMENT until payment exists (slice 5), so every placed order counts except a
-     * cancelled, rejected or refunded one. Slice 5 tightens this to paid/completed.
-     */
-    static final Set<OrderStatus> BOUGHT_STATUSES = EnumSet.complementOf(
-        EnumSet.of(OrderStatus.CANCELLED, OrderStatus.REJECT, OrderStatus.REFUND));
-
-    /**
-     * YAS isOrderCompletedWithUserIdAndProductId: whether the caller has an order with the product or one of its
-     * variations (YAS checks only the variations when there are some; the product's own id is kept as well).
+     * YAS isOrderCompletedWithUserIdAndProductId: whether the caller has a paid, shipping or completed order (5-3;
+     * 4-30 counted every placed order until payment existed) with the product or one of its variations (YAS checks
+     * only the variations when there are some; the product's own id is kept as well).
      */
     @Transactional(readOnly = true)
     public OrderExistsByProductAndUserGetVm hasBoughtProduct(Long productId) {
@@ -265,7 +260,7 @@ public class OrderService {
         productIds.add(productId);
         productIds.addAll(productService.getVariationIds(productId));
         return new OrderExistsByProductAndUserGetVm(
-            orderRepository.existsBoughtProduct(customerId, productIds, BOUGHT_STATUSES));
+            orderRepository.existsBoughtProduct(customerId, productIds, OrderTransitions.BOUGHT_STATUSES));
     }
 
     @Transactional(readOnly = true)

@@ -167,18 +167,23 @@ services:
     networks:
       - shopapp-network
 
-  # one-shot: replication user, grants and publication in the product DB (idempotent; needs product's tables)
+  # one-shot: replication user, grants and publications in the product and order DBs (idempotent; needs their
+  # tables) (decisions.md 4-3, 5-7)
   debezium-db-init:
     image: postgres:16.16
-    command: ["psql", "-q", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "product", "-f", "/sql/debezium-user.sql"]
+    command: ["sh", "-c", "psql -q -h postgres -U \"$$PGUSER\" -d product -f /sql/debezium-user.sql && psql -q -h postgres -U \"$$PGUSER\" -d order -f /sql/debezium-order.sql"]
     environment:
+      PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
       DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
     volumes:
       - ./docker/postgres/debezium-user.sql:/sql/debezium-user.sql:ro
+      - ./docker/postgres/debezium-order.sql:/sql/debezium-order.sql:ro
     depends_on:
       product:
+        condition: service_healthy
+      order:
         condition: service_healthy
     networks:
       - shopapp-network
@@ -380,6 +385,10 @@ services:
       SHOPAPP_SERVICES_LOCATION: http://location:8080/location
       # coupon verify / apply-usage / release-usage, straight to the container (decisions.md 4-54)
       SHOPAPP_SERVICES_PROMOTION: http://promotion:8080/promotion
+      # its own client-credentials token for product's / promotion's internal endpoints, straight to Keycloak on the
+      # network (the token's issuer stays KEYCLOAK_URL) (decisions.md 5-5)
+      SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
+      ORDER_SERVICE_CLIENT_SECRET: ${ORDER_SERVICE_CLIENT_SECRET}
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /order/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
       interval: 10s

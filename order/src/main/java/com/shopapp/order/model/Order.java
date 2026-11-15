@@ -19,6 +19,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.ZonedDateTime;
 import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -67,6 +68,22 @@ public class Order extends AbstractAuditEntity {
     /** The coupon use taken for this order in promotion (decisions.md 4-53); null without a coupon. */
     @Column(name = "promotion_usage_reference")
     private UUID promotionUsageReference;
+
+    /** The stock reference sent to product subtract-quantity when the order was placed (5-2); null before slice 5. */
+    @Column(name = "stock_reference")
+    private String stockReference;
+
+    /** When the order was asked to give its stock and coupon use back (5-4); null while it keeps them. */
+    @Column(name = "goods_back_requested_on")
+    private ZonedDateTime goodsBackRequestedOn;
+
+    /** When product gave the stock back; written only by {@code OrderRepository.markStockRestored}. */
+    @Column(name = "stock_restored_on", insertable = false, updatable = false)
+    private ZonedDateTime stockRestoredOn;
+
+    /** When promotion gave the coupon use back; written only by {@code OrderRepository.markCouponReleased}. */
+    @Column(name = "promotion_usage_released_on", insertable = false, updatable = false)
+    private ZonedDateTime couponReleasedOn;
 
     @Column(name = "total_amount")
     private BigDecimal totalPrice;

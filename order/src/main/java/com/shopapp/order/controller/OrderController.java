@@ -1,5 +1,6 @@
 package com.shopapp.order.controller;
 
+import com.shopapp.order.service.OrderLifecycleService;
 import com.shopapp.order.service.OrderService;
 import com.shopapp.order.viewmodel.order.OrderExistsByProductAndUserGetVm;
 import com.shopapp.order.viewmodel.order.OrderPostVm;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class OrderController {
 
     private final OrderService orderService;
+    private final OrderLifecycleService lifecycleService;
 
     @PostMapping("/storefront/orders")
     public ResponseEntity<OrderVm> createOrder(@Valid @RequestBody OrderPostVm orderPostVm) {
@@ -44,6 +46,15 @@ public class OrderController {
     @GetMapping("/storefront/orders/my-orders")
     public ResponseEntity<List<OrderVm>> getMyOrders() {
         return ResponseEntity.ok(orderService.getMyOrders());
+    }
+
+    /**
+     * The customer cancels their own order while it is PENDING or PENDING_PAYMENT; its stock and coupon use are given
+     * back. Someone else's order is a 404; repeating the call is safe (5-1, 5-4).
+     */
+    @PostMapping("/storefront/orders/{id}/cancel")
+    public ResponseEntity<OrderVm> cancelOrder(@PathVariable Long id) {
+        return ResponseEntity.ok(lifecycleService.cancelOwnOrder(id));
     }
 
     @GetMapping("/storefront/orders/checkout/{id}")

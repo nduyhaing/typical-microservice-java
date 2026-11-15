@@ -6,13 +6,15 @@ import com.shopapp.order.model.OrderItem;
 import com.shopapp.order.model.enumeration.DeliveryStatus;
 import com.shopapp.order.model.enumeration.OrderStatus;
 import com.shopapp.order.model.enumeration.PaymentStatus;
+import com.shopapp.order.service.OrderTransitions;
 import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.List;
 
 /**
  * An order as the storefront shows it ("my orders", order confirmation). {@code totalPrice} = subtotal + tax -
- * discount (decisions.md 3c-43); {@code couponCode} the coupon that gave the discount (4-50).
+ * discount (decisions.md 3c-43); {@code couponCode} the coupon that gave the discount (4-50);
+ * {@code cancellable} whether the customer may still cancel it (5-1).
  */
 public record OrderVm(
     Long id,
@@ -32,13 +34,14 @@ public record OrderVm(
     DeliveryStatus deliveryStatus,
     ZonedDateTime createdOn,
     AddressVm shippingAddressVm,
-    List<ItemVm> orderItemVms
+    List<ItemVm> orderItemVms,
+    boolean cancellable
 ) {
 
     public record ItemVm(Long productId, String productName, int quantity, BigDecimal productPrice,
                          BigDecimal discountAmount, BigDecimal taxPercent, BigDecimal taxAmount) {
 
-        static ItemVm fromModel(OrderItem item) {
+        public static ItemVm fromModel(OrderItem item) {
             return new ItemVm(item.getProductId(), item.getProductName(), item.getQuantity(), item.getProductPrice(),
                 item.getDiscountAmount() == null ? BigDecimal.ZERO : item.getDiscountAmount(), item.getTaxPercent(),
                 item.getTaxAmount());
@@ -48,7 +51,7 @@ public record OrderVm(
     public record AddressVm(String contactName, String phone, String addressLine1, String addressLine2, String city,
                             String zipCode, String districtName, String stateOrProvinceName, String countryName) {
 
-        static AddressVm fromModel(OrderAddress address) {
+        public static AddressVm fromModel(OrderAddress address) {
             return address == null ? null : new AddressVm(address.getContactName(), address.getPhone(),
                 address.getAddressLine1(), address.getAddressLine2(), address.getCity(), address.getZipCode(),
                 address.getDistrictName(), address.getStateOrProvinceName(), address.getCountryName());
@@ -64,6 +67,7 @@ public record OrderVm(
             order.getDeliveryFee(), order.getCouponCode(),
             order.getOrderStatus(), order.getPaymentStatus(), order.getPaymentMethodId(), order.getDeliveryStatus(),
             order.getCreatedOn(), AddressVm.fromModel(order.getShippingAddressId()),
-            items.stream().map(ItemVm::fromModel).toList());
+            items.stream().map(ItemVm::fromModel).toList(),
+            OrderTransitions.customerMayCancel(order.getOrderStatus()));
     }
 }

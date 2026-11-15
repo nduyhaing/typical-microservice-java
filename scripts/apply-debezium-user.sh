@@ -10,5 +10,7 @@ export MSYS_NO_PATHCONV=1
 set -a; source .env; set +a
 docker compose exec -T -e DEBEZIUM_DB_USER -e DEBEZIUM_DB_PASSWORD postgres \
     psql -q -U "$POSTGRES_USER" -d product -f - < docker/postgres/debezium-user.sql
+# order CDC (decisions.md 5-7): grants on the order table and the dbz_order publication
+docker compose exec -T -e DEBEZIUM_DB_USER postgres     psql -q -U "$POSTGRES_USER" -d order -f - < docker/postgres/debezium-order.sql
 docker compose exec -T postgres psql -q -U "$POSTGRES_USER" -tAc "SELECT pg_reload_conf()" >/dev/null
-echo "Debezium user $DEBEZIUM_DB_USER and publication dbz_product are in place"
+echo "Debezium user $DEBEZIUM_DB_USER and publications dbz_product, dbz_order are in place"

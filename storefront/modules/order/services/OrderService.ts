@@ -19,3 +19,6 @@ export const previewOrder = (checkoutId: string, address: AddressChoice, couponC
   post<OrderPreview>(`${base}/orders/preview`, { checkoutId, ...address, ...(couponCode ? { couponCode } : {}) });
 
 export const getMyOrders = () => get<Order[]>(`${base}/orders/my-orders`);
+
+/** The customer cancels their own order while it is pending or awaiting payment (400 with the reason otherwise). */
+export const cancelOrder = (id: number) => post<Order>(`${base}/orders/${id}/cancel`, {});

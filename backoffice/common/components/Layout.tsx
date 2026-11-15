@@ -25,6 +25,16 @@ export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
     ],
   },
   {
+    label: 'Sales',
+    links: [
+      {
+        href: '/sales/orders',
+        label: 'Orders',
+        description: 'Orders: search, see the details, move them through payment, shipping, cancel or refund.',
+      },
+    ],
+  },
+  {
     label: 'Location',
     links: [
       { href: '/location/countries', label: 'Countries', description: 'Countries, their codes and address options.' },

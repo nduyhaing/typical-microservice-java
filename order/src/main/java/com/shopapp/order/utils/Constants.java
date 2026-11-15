@@ -2,6 +2,12 @@ package com.shopapp.order.utils;
 
 public final class Constants {
 
+    /** Largest page of the back-office order list, and the largest page number (bounded paging). */
+    public static final int MAX_PAGE_SIZE = 100;
+    public static final int MAX_PAGE_NO = 10_000_000;
+    /** Longest email / product name filter. */
+    public static final int MAX_FILTER_LENGTH = 255;
+
     /** Largest quantity of one product (same limit as the cart, decisions.md 2b-11). */
     public static final int MAX_QUANTITY = 1000;
 
@@ -25,6 +31,12 @@ public final class Constants {
         public static final String DISTRICT_NOT_IN_STATE = "DISTRICT_NOT_IN_STATE";
         public static final String NOT_ENOUGH_STOCK = "NOT_ENOUGH_STOCK";
         public static final String PRODUCTS_NO_LONGER_AVAILABLE = "PRODUCTS_NO_LONGER_AVAILABLE";
+        public static final String ORDER_ID_NOT_FOUND = "ORDER_ID_NOT_FOUND";
+        public static final String ORDER_STATUS_NOT_ALLOWED = "ORDER_STATUS_NOT_ALLOWED";
+        public static final String ORDER_NOT_CANCELLABLE = "ORDER_NOT_CANCELLABLE";
+        public static final String ORDER_ALREADY_PAID = "ORDER_ALREADY_PAID";
+        public static final String ORDER_NOT_PAYABLE = "ORDER_NOT_PAYABLE";
+        public static final String PAYMENT_AMOUNT_MISMATCH = "PAYMENT_AMOUNT_MISMATCH";
 
         private ErrorCode() {
         }

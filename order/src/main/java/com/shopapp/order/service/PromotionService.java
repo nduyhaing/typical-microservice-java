@@ -10,6 +10,7 @@ import com.shopapp.order.viewmodel.external.PromotionVerifyVm;
 import com.shopapp.order.viewmodel.external.RemoteErrorVm;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -35,9 +36,11 @@ public class PromotionService {
     private static final Pattern ERROR_CODE = Pattern.compile("[A-Z][A-Z_]{2,63}");
 
     private final RestClient restClient;
+    private final ServiceTokenProvider serviceTokens;
 
-    public PromotionService(OrderServiceUrls urls) {
+    public PromotionService(OrderServiceUrls urls, ServiceTokenProvider serviceTokens) {
         this.restClient = RestClients.withTimeouts(urls.promotion());
+        this.serviceTokens = serviceTokens;
     }
 
     /**
@@ -105,6 +108,21 @@ public class PromotionService {
             log.error("Could not give back the coupon use of failed order attempt {}: {}", usage.reference(),
                 ex.getMessage());
         }
+    }
+
+    /**
+     * Gives back the coupon use of a placed order under its stored reference, through promotion's internal endpoint
+     * with the order service's own token (decisions.md 5-4, 5-5); promotion releases a use at most once.
+     *
+     * @return whether promotion confirmed (2xx); false when it is down or refused, so the caller retries later
+     */
+    public boolean releaseOrderUsage(Long orderId, UUID reference) {
+        String what = "release the coupon use of order " + orderId;
+        return InternalCalls.send(serviceTokens, what, token -> restClient.post()
+            .uri(uri -> uri.path("/internal/promotions/release-usage").queryParam("reference", reference).build())
+            .headers(headers -> headers.setBearerAuth(token))
+            .retrieve()
+            .toBodilessEntity());
     }
 
     private static Coupon toCoupon(PromotionVerifyResultVm result, List<Long> productIds) {

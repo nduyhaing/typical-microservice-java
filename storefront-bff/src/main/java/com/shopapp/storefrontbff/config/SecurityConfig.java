@@ -38,6 +38,12 @@ public class SecurityConfig {
         "/api/promotion/storefront/promotions/apply-usage/**",
         "/api/promotion/storefront/promotions/release-usage/**"};
 
+    /**
+     * Service-to-service endpoints of every service (realm role SERVICE; order gives a cancelled order's goods back,
+     * payment marks an order paid): never through a BFF, also not for an admin (decisions.md 5-5).
+     */
+    private static final String INTERNAL = "/api/*/internal/**";
+
     private static final String REALM_ACCESS_CLAIM = "realm_access";
     private static final String ROLES_CLAIM = "roles";
 
@@ -54,6 +60,7 @@ public class SecurityConfig {
                 // product's order-only stock endpoints are for the order service inside the network (3c-63)
                 .pathMatchers(STOCK_WRITES).denyAll()
                 .pathMatchers(COUPON_USAGE).denyAll()
+                .pathMatchers(INTERNAL).denyAll()
                 .pathMatchers("/profile/**").authenticated()
                 .anyExchange().permitAll())
             .oauth2Login(Customizer.withDefaults())

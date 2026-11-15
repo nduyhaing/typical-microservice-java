@@ -29,6 +29,7 @@ describe('Back office layout and dashboard', () => {
     const nav = screen.getByRole('navigation');
     const groups: [string, [string, string][]][] = [
       ['Catalog', [['Brands', '/catalog/brands'], ['Categories', '/catalog/categories'], ['Products', '/catalog/products'], ['Reviews', '/reviews']]],
+      ['Sales', [['Orders', '/sales/orders']]],
       ['Location', [['Countries', '/location/countries'], ['States or provinces', '/location/state-or-provinces']]],
       ['Tax', [['Tax classes', '/tax/tax-classes'], ['Tax rates', '/tax/tax-rates']]],
       [
