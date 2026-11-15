@@ -59,6 +59,8 @@ services:
       KC_HEALTH_ENABLED: "true"
       # Keycloak's default heap is 70 % of the VM; cap it so the whole stack fits
       JAVA_OPTS_KC_HEAP: -Xms256m -Xmx768m
+      # bound Keycloak's DB pool (Postgres max_connections is shared by every service)
+      KC_DB_POOL_MAX_SIZE: 20
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       # substituted into ${DOMAIN} placeholders of the realm import
