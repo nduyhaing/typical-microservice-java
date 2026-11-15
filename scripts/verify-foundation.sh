@@ -805,7 +805,7 @@ check_slice3c() {
     local customer_token
     check_http "countries are public" "$(url api /location/storefront/countries)" 200
     customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
-        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']" || true)
     check_http "a customer cannot create a tax class" "$(url api /tax/backoffice/tax-classes)" 403 \
         -H "Authorization: Bearer $customer_token" -H 'Content-Type: application/json' -d '{"name":"Customer VAT"}'
     check_http "a customer cannot create a warehouse" "$(url api /inventory/backoffice/warehouses)" 403 \

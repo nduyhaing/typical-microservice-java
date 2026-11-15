@@ -280,6 +280,14 @@ typecheck/build, compose healthy with `media` and volume `media-data`, smoke `--
 
 Deferred from the 3c review (minor): M1 a slow subtract followed by a restore that commits before it can leak stock (the restore finds no reservation yet; a tombstone row for restored references would fix it), a restore with an expired customer token fails (logged), and an ambiguous commit after the subtract leaves the units taken; M4 the stock list sends all of a warehouse's product ids in one for-warehouse URL, which gets too long with thousands of products; M5 more than 100 saved addresses break location's id lookups (`ids` max 100); M8 `taxIncluded` on products is ignored (prices are always before tax, as YAS does). Also noted: districts are read-only (location has no district admin API) and `reservedQuantity` is unused (always 0).
 
+Slice 3c definition of done met (2026-11-15): `mvn verify` of location (26 ITs), tax (55), inventory (28),
+customer, order (49), cart (25) and product (146 ITs; the search agent's uncommitted `ProductEsDetailIT` left out)
+green; storefront (89 tests) and back office (127) tests/lint/typecheck/build green; compose healthy incl. location,
+tax and inventory; `scripts/verify-foundation.sh --restart` and a second plain run: every check passes, slice 3c
+(`check_slice3c`, 3c-70) and `check_cdc` included, except the slice 4 search agent's uncommitted `check_search`
+("search 'galaxy' returned no products": search is still in progress). Earlier runs that day failed on Postgres
+connection exhaustion (fixed in 9add43c: `max_connections` 200, Hikari pool 5, Keycloak pool 20).
+
 ### 4 — CDC, search, rating, promotion
 
 | # | Decision | By | Why | Cost if wrong |
