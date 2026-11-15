@@ -2,6 +2,7 @@ package com.shopapp.inventory.service;
 
 import com.shopapp.commonlibrary.exception.BadRequestException;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import com.shopapp.commonlibrary.viewmodel.error.ErrorVm;
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -30,7 +31,7 @@ final class RemoteCalls {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
+        return ObservedRestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 
     /**

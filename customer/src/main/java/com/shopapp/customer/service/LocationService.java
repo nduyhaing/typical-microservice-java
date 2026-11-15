@@ -3,6 +3,7 @@ package com.shopapp.customer.service;
 import com.shopapp.commonlibrary.exception.BadRequestException;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
 import com.shopapp.commonlibrary.exception.NotFoundException;
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import com.shopapp.commonlibrary.utils.AuthenticationUtils;
 import com.shopapp.commonlibrary.viewmodel.error.ErrorVm;
 import com.shopapp.customer.config.CustomerServiceUrls;
@@ -41,7 +42,7 @@ public class LocationService {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(2));
         requestFactory.setReadTimeout(Duration.ofSeconds(5));
-        this.restClient = RestClient.builder().baseUrl(urls.location()).requestFactory(requestFactory).build();
+        this.restClient = ObservedRestClient.builder().baseUrl(urls.location()).requestFactory(requestFactory).build();
     }
 
     public AddressVm createAddress(AddressPostVm address) {

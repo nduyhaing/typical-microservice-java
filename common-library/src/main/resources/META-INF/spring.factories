@@ -1,0 +1,3 @@
+# shared telemetry defaults: export off unless an OTLP endpoint is configured (decisions.md 6-1)
+org.springframework.boot.EnvironmentPostProcessor=\
+com.shopapp.commonlibrary.observability.ObservabilityEnvironmentPostProcessor

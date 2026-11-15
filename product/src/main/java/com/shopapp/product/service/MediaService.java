@@ -1,6 +1,7 @@
 package com.shopapp.product.service;
 
 import com.shopapp.commonlibrary.config.ServiceUrlConfig;
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import com.shopapp.product.viewmodel.NoFileMediaVm;
 import java.net.URI;
 import java.time.Duration;
@@ -65,7 +66,7 @@ public class MediaService {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(connectTimeout);
         requestFactory.setReadTimeout(readTimeout);
-        this.restClient = RestClient.builder().requestFactory(requestFactory).build();
+        this.restClient = ObservedRestClient.builder().requestFactory(requestFactory).build();
         this.failureThreshold = Math.max(1, failureThreshold);
         this.openNanos = openDuration.toNanos();
     }

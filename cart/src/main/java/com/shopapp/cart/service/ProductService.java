@@ -3,6 +3,7 @@ package com.shopapp.cart.service;
 import com.shopapp.cart.viewmodel.ProductThumbnailVm;
 import com.shopapp.commonlibrary.config.ServiceUrlConfig;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -33,7 +34,7 @@ public class ProductService {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(2));
         requestFactory.setReadTimeout(Duration.ofSeconds(5));
-        this.restClient = RestClient.builder()
+        this.restClient = ObservedRestClient.builder()
             .baseUrl(serviceUrlConfig.product())
             .requestFactory(requestFactory)
             .build();

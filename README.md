@@ -40,7 +40,7 @@ Designs and plans live in `docs/superpowers/`.
   (or `/etc/hosts` on macOS/Linux):
 
   ```
-  127.0.0.1 identity.shopapp.local api.shopapp.local pgadmin.shopapp.local kafka.shopapp.local storefront.shopapp.local backoffice.shopapp.local
+  127.0.0.1 identity.shopapp.local api.shopapp.local pgadmin.shopapp.local kafka.shopapp.local storefront.shopapp.local backoffice.shopapp.local grafana.shopapp.local
   ```
 
 ## Run it
@@ -331,6 +331,43 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
   *Active* flag instead. Unused coupons can be deleted.
 - Not yet: cancelling an order does not give the use back (no cancel flow before slice 5); "My orders" shows the
   total without a separate discount line.
+
+## Observability
+
+Metrics, logs and traces of every Spring service in Grafana (slice 6, `decisions.md` 6-1..6-19). **Off by default**
+(memory): the services only export when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, which the add-on file does.
+
+```bash
+# on: collector, Prometheus, Loki, Tempo, Grafana, kafka-exporter + the OTLP endpoint for every service
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d --wait
+# off: services recreated without the endpoint, then remove the add-on containers (their volumes are kept)
+docker compose up -d --wait
+docker compose -f docker-compose.yml -f docker-compose.observability.yml rm -sf otel-collector prometheus loki tempo grafana kafka-exporter
+```
+
+Needs `grafana.shopapp.local` in the hosts line (see Prerequisites): `127.0.0.1 grafana.shopapp.local`.
+
+| What | Where |
+|---|---|
+| Grafana | http://grafana.shopapp.local - read-only without login; admin `admin` / `GRAFANA_ADMIN_PASSWORD` from `.env` (`grafana-dev`) |
+| Dashboards | folder *shop_app*: **Service: JVM & HTTP** (pick a service: requests, errors, p95, outgoing calls, heap, GC, threads, its log lines) and **Kafka consumer lag** (search, recommendation, webhook groups) |
+| Traces | Explore → Tempo, e.g. TraceQL `{ resource.service.name = "storefront-bff" } && { resource.service.name = "order" }`: a checkout is one trace storefront-bff → order → location, tax, product, cart; "Logs for this span" opens its Loki lines |
+| Logs | Explore → Loki: `{service_name="order"}` or `{service_name=~".+"} \| trace_id="<trace id>"`; a line's *View trace* opens Tempo. Console lines carry `[traceId-spanId]` too, also with the add-on off |
+| Metrics | Explore → Prometheus: the service name is the `job` label (`jvm_memory_used_bytes{job="tax"}`, `http_server_requests_seconds_count`, `kafka_consumergroup_lag`) |
+
+How it works: `common-library` brings Spring Boot's OpenTelemetry support to every service and both BFFs; spans,
+log records and metrics are pushed over OTLP/HTTP to the collector, which sends traces to Tempo, logs to Loki and
+metrics to Prometheus (the services are not scraped; no host ports - only Grafana is reachable, through nginx).
+Export is asynchronous with bounded queues: when the collector is down, telemetry is dropped and requests are not
+affected. Calls between services are traced because the services build their RestClients with
+`ObservedRestClient.builder()` (use it for new clients too). Debezium CDC messages carry no trace context, so each
+consumed CDC event starts its own trace. Actuator requests are not traced, and `/<service>/actuator/**` other than
+`health` is blocked at nginx.
+
+Memory: about **1.2-1.3 GB** on top of the stack - ~0.6 GB for the six add-on containers (Grafana, Prometheus,
+Tempo, Loki, collector, kafka-exporter; each has a memory limit) plus ~15-50 MB per exporting JVM. Turn it on only
+with that much free in the Docker VM: when the VM swaps, the backends time out and telemetry is dropped (the shop
+keeps working).
 
 ## Resources
 

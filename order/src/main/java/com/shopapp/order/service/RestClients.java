@@ -1,5 +1,6 @@
 package com.shopapp.order.service;
 
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import java.time.Duration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -14,6 +15,6 @@ final class RestClients {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(2));
         requestFactory.setReadTimeout(Duration.ofSeconds(5));
-        return RestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
+        return ObservedRestClient.builder().baseUrl(baseUrl).requestFactory(requestFactory).build();
     }
 }

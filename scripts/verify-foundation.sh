@@ -124,6 +124,15 @@ check_ports_loopback_only() {
     if [ -z "$exposed" ]; then pass "published ports listen on 127.0.0.1 only"; else fail "ports exposed on all interfaces: $exposed"; fi
 }
 
+check_actuator_edge() {
+    # metrics and the other actuator endpoints stay inside the compose network; health stays public (decisions.md 6-13)
+    check_http "actuator health is public" "$(url api /tax/actuator/health)" 200
+    check_http "actuator metrics are blocked at the gateway" "$(url api /tax/actuator/prometheus)" 404
+    check_http "actuator endpoint list is blocked at the gateway" "$(url api /order/actuator)" 404
+    check_http "path-parameter trick is blocked too" "$(url api '/order/actuator;x/env')" 404
+    check_http "BFF actuator metrics are blocked" "$(url storefront /actuator/metrics)" 404
+}
+
 check_http() {
     # check_http <name> <url> <expected status> [extra curl args...]
     local name=$1 target=$2 expected=$3 code
@@ -1277,6 +1286,7 @@ run_checks() {
     check_http "Kafka UI reachable" "$(url kafka /)" 200
     check_http "pgAdmin reachable" "$(url pgadmin /misc/ping)" 200
     check_http "API placeholder" "$(url api /)" 404
+    check_actuator_edge
     check_databases
     check_storefront
     webhook_order_subscribe

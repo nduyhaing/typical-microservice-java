@@ -13,6 +13,11 @@ map $http_x_forwarded_proto $forwarded_proto {
     ""      $scheme;
 }
 
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ""      close;
+}
+
 # Unknown host names are dropped.
 server {
     listen ${NGINX_HTTP_PORT} default_server;
@@ -56,6 +61,14 @@ server {
     location ~* ^/+[^/]+/+internal(/|$) {
         default_type application/json;
         return 403 '{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}';
+    }
+
+    # Actuator endpoints (metrics, ...) are for the compose network / observability stack only; health stays public
+    # for checks. Matches /<service>/actuator... (also "actuator;x" or "actuatorx") unless it is .../actuator/health
+    # (decisions.md 6-13).
+    location ~* ^/+[^/]+/+actuator(?!/+health(/|$)) {
+        default_type application/json;
+        return 404 '{"statusCode":"404 NOT_FOUND","title":"Not Found","detail":"Not available through the gateway","fieldErrors":[]}';
     }
 
     location /product/ {
@@ -286,6 +299,12 @@ server {
     listen ${NGINX_HTTP_PORT};
     server_name storefront.${DOMAIN};
 
+    # the BFF's own actuator endpoints: health only (decisions.md 6-13)
+    location ~* ^/+actuator(?!/+health(/|$)) {
+        default_type application/json;
+        return 404 '{"statusCode":"404 NOT_FOUND","title":"Not Found","detail":"Not available through the gateway","fieldErrors":[]}';
+    }
+
     location / {
         set $upstream_storefront_bff storefront-bff:8087;
         proxy_pass http://$upstream_storefront_bff;
@@ -306,6 +325,12 @@ server {
     # back-office image uploads go through this host (3b-15); same limit as the api host (3b-23).
     client_max_body_size 11m;
 
+    # the BFF's own actuator endpoints: health only (decisions.md 6-13)
+    location ~* ^/+actuator(?!/+health(/|$)) {
+        default_type application/json;
+        return 404 '{"statusCode":"404 NOT_FOUND","title":"Not Found","detail":"Not available through the gateway","fieldErrors":[]}';
+    }
+
     location / {
         set $upstream_backoffice_bff backoffice-bff:8088;
         proxy_pass http://$upstream_backoffice_bff;
@@ -317,5 +342,27 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
         proxy_set_header X-Forwarded-Host $http_host;
+    }
+}
+
+# Grafana (observability add-on, docker-compose.observability.yml). Resolved per request like every upstream, so nginx
+# starts and serves the shop without it; 502 while it is not running (decisions.md 6-11).
+server {
+    listen ${NGINX_HTTP_PORT};
+    server_name grafana.${DOMAIN};
+
+    location / {
+        set $upstream_grafana grafana:3000;
+        proxy_pass http://$upstream_grafana;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+        # Grafana Live (websocket)
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
     }
 }

@@ -2,6 +2,7 @@ package com.shopapp.promotion.service;
 
 import com.shopapp.commonlibrary.config.ServiceUrlConfig;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import com.shopapp.promotion.viewmodel.product.ProductTargetVm;
 import java.time.Duration;
 import java.util.Collection;
@@ -36,7 +37,7 @@ public class ProductService {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        this.restClient = RestClient.builder().baseUrl(urls.product()).requestFactory(requestFactory).build();
+        this.restClient = ObservedRestClient.builder().baseUrl(urls.product()).requestFactory(requestFactory).build();
     }
 
     /** The requested products that can be ordered (unknown, unpublished or not orderable ids are left out). */

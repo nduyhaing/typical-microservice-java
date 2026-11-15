@@ -1,0 +1,32 @@
+# Tempo, single binary on the local filesystem (decisions.md 6-7): OTLP/gRPC from the collector, 24 h retention.
+# YAS: Tempo 1.5 with jaeger/zipkin/opencensus receivers too; only OTLP is needed here.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 24h
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+usage_report:
+  reporting_enabled: false

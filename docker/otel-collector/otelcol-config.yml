@@ -1,0 +1,53 @@
+# OpenTelemetry collector (decisions.md 6-7): the services push OTLP/HTTP here (OTEL_EXPORTER_OTLP_ENDPOINT); traces go
+# to Tempo, logs to Loki's OTLP endpoint, metrics to Prometheus' OTLP receiver. YAS: same fan-out, but Loki's native
+# OTLP ingestion replaces the loki exporter and Prometheus' OTLP receiver replaces remote-write.
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # refuse data (the SDKs retry later or drop) instead of being OOM-killed
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 240
+    spike_limit_mib: 50
+  batch: {}
+
+exporters:
+  otlp_grpc/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  otlp_http/loki:
+    endpoint: http://loki:3100/otlp
+  otlp_http/prometheus:
+    endpoint: http://prometheus:9090/api/v1/otlp
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_grpc/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/loki]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: none

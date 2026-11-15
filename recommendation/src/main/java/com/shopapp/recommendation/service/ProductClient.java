@@ -1,5 +1,6 @@
 package com.shopapp.recommendation.service;
 
+import com.shopapp.commonlibrary.observability.ObservedRestClient;
 import com.shopapp.recommendation.config.RecommendationServiceUrls;
 import com.shopapp.recommendation.viewmodel.ProductDetailVm;
 import com.shopapp.recommendation.viewmodel.ProductEsDetailVm;
@@ -26,7 +27,7 @@ public class ProductClient {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(CONNECT_TIMEOUT);
         requestFactory.setReadTimeout(READ_TIMEOUT);
-        this.restClient = RestClient.builder().baseUrl(urls.product()).requestFactory(requestFactory).build();
+        this.restClient = ObservedRestClient.builder().baseUrl(urls.product()).requestFactory(requestFactory).build();
     }
 
     /**
