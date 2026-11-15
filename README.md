@@ -464,6 +464,11 @@ edge refuses what compose nginx refuses; `k8s/scripts/check-edge-parity.sh` chec
 - Give Docker (Docker Desktop / Rancher Desktop VM) **about 10 GB of free memory**: the stack plus `mvn verify`'s
   Testcontainers (Postgres, Kafka, Elasticsearch) need it. Run one Testcontainers build at a time.
 
+## URLs and credentials
+
+**Local development only — never reuse these anywhere else.**
+
+| What | URL | Credentials |
 |---|---|---|
 | Keycloak admin console | http://identity.shopapp.local/admin | `admin` / `admin` (master realm) |
 | Keycloak realm `shopapp` | http://identity.shopapp.local/realms/shopapp | users `admin`/`admin` (ADMIN), `customer`/`customer` (CUSTOMER) |
@@ -474,11 +479,6 @@ edge refuses what compose nginx refuses; `k8s/scripts/check-edge-parity.sh` chec
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
 | Search API | http://api.shopapp.local/search/storefront/catalog-search?keyword=galaxy | public; `POST /search/backoffice/reindex` needs ADMIN |
-| Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
-| Media API / images | http://api.shopapp.local/media/medias/{id}, .../medias/{id}/file/{fileName} | GETs public; upload/delete need ADMIN |
-| Location API | http://api.shopapp.local/location/storefront/countries (public lookups), .../location/storefront/addresses, .../location/backoffice/... | lookups public; addresses need a token; `backoffice` needs ADMIN |
-| Tax API | http://api.shopapp.local/tax/backoffice/tax-classes, .../tax/backoffice/tax-rates | ADMIN (order reads rates with the customer's token) |
-| Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
 | Storefront search page | http://storefront.shopapp.local/search?keyword=galaxy | public (header search box with suggestions) |
 | Recommendation API | http://api.shopapp.local/recommendation/embedding/product/{id}/similarity | public; `POST /recommendation/backoffice/reindex` needs ADMIN |
 | Webhook API / test receiver | http://api.shopapp.local/webhook/backoffice/webhooks, `docker compose logs webhook-receiver` | ADMIN; back office System → Webhooks |
@@ -486,6 +486,11 @@ edge refuses what compose nginx refuses; `k8s/scripts/check-edge-parity.sh` chec
 | Rating API | http://api.shopapp.local/rating/storefront/ratings/products/{productId}, .../rating/storefront/ratings/product/{productId}/average-star, .../rating/backoffice/ratings | lists and averages public; posting/deleting own reviews needs CUSTOMER; `backoffice` ADMIN |
 | Promotion API | http://api.shopapp.local/promotion/backoffice/promotions, .../promotion/storefront/promotions/verify | `backoffice` ADMIN; `storefront` any logged-in user (order calls it with the customer's token) |
 | Back office: reviews, promotions | http://backoffice.shopapp.local/reviews, /promotion/manager-promotion | `admin` / `admin` |
+| Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
+| Media API / images | http://api.shopapp.local/media/medias/{id}, .../medias/{id}/file/{fileName} | GETs public; upload/delete need ADMIN |
+| Location API | http://api.shopapp.local/location/storefront/countries (public lookups), .../location/storefront/addresses, .../location/backoffice/... | lookups public; addresses need a token; `backoffice` needs ADMIN |
+| Tax API | http://api.shopapp.local/tax/backoffice/tax-classes, .../tax/backoffice/tax-rates | ADMIN (order reads rates with the customer's token) |
+| Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
 | Back office: location, tax, inventory | http://backoffice.shopapp.local/location/countries, /location/state-or-provinces, /tax/tax-classes, /tax/tax-rates, /inventory/warehouses, /inventory/warehouse-products, /inventory/warehouse-stocks | `admin` / `admin` |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |

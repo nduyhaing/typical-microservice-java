@@ -937,15 +937,6 @@ s4_cleanup() {
     fi
 }
 
-# Slice 4 reviews (decisions.md 4-30..4-39): check_checkout_and_order orders Galaxy S24 Violet on every run, and a
-# variation's parent counts as bought (4-30), so the customer may review Galaxy S24.
-check_rating() {
-    local product_id sub customer_token r other_id html avg
-    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
-        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
-    sub=$(python -c "import base64,json,sys
-p=sys.argv[1].split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p + '=' * (-len(p) % 4)))['sub'])" \
-        "$customer_token" 2>/dev/null || true)
 # Slice 5 payments (decisions.md 5-12..5-19): the customer pays the order cash on delivery through the storefront
 # BFF (a fake amount in the body is ignored: the server charges the order total), the admin confirms the cash in the
 # back office and the order becomes PAID. PayPal without credentials is not offered; payment-paypal is not reachable.
@@ -976,6 +967,15 @@ check_cod_payment() {
     if [ "$r" = "PAID/COMPLETED" ]; then pass "order #$order_id is PAID after the COD confirmation"; else fail "order #$order_id after COD confirmation: '$r' (expected PAID/COMPLETED)"; fi
 }
 
+# Slice 4 reviews (decisions.md 4-30..4-39): check_checkout_and_order orders Galaxy S24 Violet on every run, and a
+# variation's parent counts as bought (4-30), so the customer may review Galaxy S24.
+check_rating() {
+    local product_id sub customer_token r other_id html avg
+    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
+    sub=$(python -c "import base64,json,sys
+p=sys.argv[1].split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p + '=' * (-len(p) % 4)))['sub'])" \
+        "$customer_token" 2>/dev/null || true)
     product_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-s24)" | json "d['id']")
     if [ -z "$sub" ] || [ -z "$product_id" ] || ! s4_customer_login || ! s4_admin_login; then
         fail "look up Galaxy S24, log the customer and the admin in (reviews)"

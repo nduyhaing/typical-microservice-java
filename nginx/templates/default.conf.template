@@ -217,19 +217,6 @@ server {
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
-    # webhooks admin (ADMIN only, through backoffice-bff); nginx does not wait for it (decisions.md 5-36)
-    location /webhook/ {
-        set $upstream_webhook webhook:8080;
-        proxy_pass http://$upstream_webhook;
-        proxy_set_header Host $http_host;
-        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
-        proxy_set_header Forwarded "";
-        proxy_set_header X-Forwarded-Prefix "";
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $forwarded_proto;
-    }
-
-    # admin-only sample data loader; nginx does not wait for it (a dev convenience, decisions.md 5-50)
     # payments (customer init/capture/cancel, public provider list, admin providers and payments); nginx does not
     # wait for it: the storefront's pay step says payments are unavailable when it is down (decisions.md 5-18)
     location /payment/ {
@@ -250,6 +237,19 @@ server {
         return 403 '{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}';
     }
 
+    # webhooks admin (ADMIN only, through backoffice-bff); nginx does not wait for it (decisions.md 5-36)
+    location /webhook/ {
+        set $upstream_webhook webhook:8080;
+        proxy_pass http://$upstream_webhook;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
+    # admin-only sample data loader; nginx does not wait for it (a dev convenience, decisions.md 5-50)
     location /sampledata/ {
         set $upstream_sampledata sampledata:8080;
         proxy_pass http://$upstream_sampledata;
