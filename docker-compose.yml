@@ -57,6 +57,8 @@ services:
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
+      # Keycloak's default heap is 70 % of the VM; cap it so the whole stack fits
+      JAVA_OPTS_KC_HEAP: -Xms256m -Xmx768m
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       # substituted into ${DOMAIN} placeholders of the realm import
@@ -92,6 +94,7 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
     ports:
       - "127.0.0.1:${KAFKA_HOST_PORT}:29092"
     volumes:
