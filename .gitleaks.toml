@@ -1,5 +1,5 @@
 # gitleaks configuration (CI: .github/workflows/security.yml). Default rules plus ONE narrow allowlist for the
-# documented local-dev Keycloak client secrets (decisions.md F-*/P-*, 6-49): the three exact values, and only in the
+# documented local-dev Keycloak client secrets (decisions.md F-*/P-*, 6-49, 5-5): the exact values, and only in the
 # two files that are meant to carry them. Any other secret, or these values in any other file, still fails the scan.
 [extend]
 useDefault = true
@@ -16,4 +16,6 @@ regexes = [
   '''^R8h9ZAofh4TCOp-iuGdzwfFA5orV_wHb$''',
   '''^LbicBnJFx8lMtjpQJTUURytZoXAXAT30$''',
   '''^QAHenhvlUDailIgh5tBuCmxbhNfkSygm$''',
+  # order-service client-credentials client (decisions.md 5-5)
+  '''^CwC9Dta2j86T39tYOC3iJyJCx-EfkJSB$''',
 ]
