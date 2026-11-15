@@ -25,6 +25,7 @@
         <module>cart</module>
         <module>customer</module>
         <module>order</module>
+        <module>media</module>
     </modules>
 
     <properties>

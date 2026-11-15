@@ -217,6 +217,31 @@ services:
     networks:
       - shopapp-network
 
+  media:
+    build: ./media
+    image: shopapp/media:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/media
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # browser-facing base of the image URLs (MediaVm.url); same port as the host uses
+      SHOPAPP_PUBLIC_URL_MEDIA: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/media
+      FILE_DIRECTORY: /images/
+    volumes:
+      - media-data:/images
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /media/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   redis:
     image: redis:7.4.12-alpine
     healthcheck:
@@ -344,6 +369,8 @@ services:
         condition: service_healthy
       order:
         condition: service_healthy
+      media:
+        condition: service_healthy
       storefront-bff:
         condition: service_healthy
       backoffice-bff:
@@ -363,3 +390,4 @@ volumes:
   pgadmin-data:
   kafka-data:
   redis-data:
+  media-data:

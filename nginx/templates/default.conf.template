@@ -41,6 +41,9 @@ server {
     listen ${NGINX_HTTP_PORT};
     server_name api.${DOMAIN};
 
+    # media uploads (the media service also limits files to 10 MB)
+    client_max_body_size 10m;
+
     location /product/ {
         set $upstream_product product:8080;
         proxy_pass http://$upstream_product;
@@ -77,6 +80,17 @@ server {
     location /order/ {
         set $upstream_order order:8080;
         proxy_pass http://$upstream_order;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
+    location /media/ {
+        set $upstream_media media:8080;
+        proxy_pass http://$upstream_media;
         proxy_set_header Host $http_host;
         # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
         proxy_set_header Forwarded "";
