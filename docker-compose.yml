@@ -132,8 +132,8 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SPRING_LIQUIBASE_CONTEXTS: ${PRODUCT_LIQUIBASE_CONTEXTS:-default}
       KEYCLOAK_URL: ${KEYCLOAK_URL}
-      # media service comes in slice 3: images fall back to placeholders
-      SHOPAPP_SERVICES_MEDIA: ""
+      # in-network; any media failure falls back to placeholder images (decisions.md 2a-11)
+      SHOPAPP_SERVICES_MEDIA: http://media:8080/media
     healthcheck:
       # the JRE image has no curl/wget and its sh is dash: plain HTTP over bash /dev/tcp
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /product/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]

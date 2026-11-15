@@ -22,6 +22,14 @@ type Props = {
   variations: ProductVariation[];
 };
 
+/** The product's distinct non-empty image URLs: thumbnail first, then the gallery images. */
+function galleryUrls(product: ProductDetail): string[] {
+  const urls = [product.thumbnailMediaUrl, ...(product.productImageMediaUrls ?? [])].filter((url): url is string =>
+    Boolean(url)
+  );
+  return [...new Set(urls)];
+}
+
 export default function ProductDetails({ product, options, variations }: Props) {
   const [selected, setSelected] = useState<Record<number, string>>({});
   const [quantityText, setQuantityText] = useState('1');
@@ -29,7 +37,12 @@ export default function ProductDetails({ product, options, variations }: Props) 
   const [cartMessage, setCartMessage] = useState<{ variant: 'success' | 'danger'; text: string }>();
   const variation = findVariation(variations, selected);
   const price = variation?.price ?? product.price;
-  const image = imageOrPlaceholder(variation?.thumbnail?.url || product.thumbnailMediaUrl);
+  // gallery: product thumbnail, then its images; a strip click picks one, choosing an option resets the pick
+  const gallery = galleryUrls(product);
+  const [pickedImage, setPickedImage] = useState<number | null>(null);
+  const image = imageOrPlaceholder(
+    pickedImage !== null ? gallery[pickedImage] : variation?.thumbnail?.url || gallery[0]
+  );
   // a product with options is bought as one of its variations (variations are products in YAS)
   const productIdToAdd = product.hasOptions ? variation?.id : product.id;
 
@@ -61,6 +74,25 @@ export default function ProductDetails({ product, options, variations }: Props) 
             unoptimized
             className="img-fluid bg-light rounded"
           />
+          {gallery.length > 1 && (
+            <div className="d-flex flex-wrap gap-2 mt-2">
+              {gallery.map((url, index) => {
+                const active = image === url;
+                return (
+                  <button
+                    key={url}
+                    type="button"
+                    className={`p-0 border rounded bg-light ${active ? 'border-dark border-2' : ''}`}
+                    aria-label={`Show image ${index + 1}`}
+                    aria-pressed={active}
+                    onClick={() => setPickedImage(index)}
+                  >
+                    <Image src={url} alt="" width={72} height={72} unoptimized className="rounded" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </Col>
         <Col md={7}>
           <h1 className="h2">{product.name}</h1>
@@ -85,7 +117,10 @@ export default function ProductDetails({ product, options, variations }: Props) 
                     size="sm"
                     className="me-2"
                     aria-pressed={active}
-                    onClick={() => setSelected({ ...selected, [option.id]: value })}
+                    onClick={() => {
+                      setSelected({ ...selected, [option.id]: value });
+                      setPickedImage(null);
+                    }}
                   >
                     {value}
                   </Button>

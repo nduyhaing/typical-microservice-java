@@ -8,6 +8,8 @@ import Row from 'react-bootstrap/Row';
 import ErrorMessage from '../../../common/components/ErrorMessage';
 import { useFetch } from '../../../common/hooks/useFetch';
 import { slugify } from '../../../common/utils/slug';
+import ImageUpload from '../../media/components/ImageUpload';
+import { UploadedImage } from '../../media/services/MediaService';
 import { ProductDetail, ProductOption, ProductPayload, ProductVariationGet } from '../models/Product';
 import { getBrands } from '../services/BrandService';
 import { getCategories } from '../services/CategoryService';
@@ -33,8 +35,6 @@ type Kept = Pick<
   | 'metaTitle'
   | 'metaKeyword'
   | 'metaDescription'
-  | 'thumbnailMediaId'
-  | 'productImageIds'
   | 'relatedProductIds'
   | 'taxClassId'
 >;
@@ -56,6 +56,9 @@ export type ProductFormValues = {
   stockTrackingEnabled: boolean;
   options: OptionInput[];
   variations: VariationInput[];
+  /** Thumbnail and gallery images (ids sent as thumbnailMediaId / productImageIds; an update replaces them). */
+  thumbnail: UploadedImage | null;
+  images: UploadedImage[];
   kept: Kept;
 };
 
@@ -77,6 +80,8 @@ export const NEW_PRODUCT: ProductFormValues = {
   stockTrackingEnabled: false,
   options: [],
   variations: [],
+  thumbnail: null,
+  images: [],
   kept: {
     specification: '',
     weight: 0,
@@ -87,8 +92,6 @@ export const NEW_PRODUCT: ProductFormValues = {
     metaTitle: '',
     metaKeyword: '',
     metaDescription: '',
-    thumbnailMediaId: null,
-    productImageIds: [],
     relatedProductIds: [],
     taxClassId: null,
   },
@@ -122,6 +125,8 @@ export function toFormValues(
       valuesText: o.values.join(', '),
     })),
     variations: variations.map((v) => toVariationInput(toVariationRow(v))),
+    thumbnail: product.thumbnailMedia ?? null,
+    images: product.productImageMedias ?? [],
     kept: {
       specification: product.specification ?? '',
       weight: product.weight ?? 0,
@@ -132,8 +137,6 @@ export function toFormValues(
       metaTitle: product.metaTitle ?? '',
       metaKeyword: product.metaKeyword ?? '',
       metaDescription: product.metaDescription ?? '',
-      thumbnailMediaId: product.thumbnailMedia?.id ?? null,
-      productImageIds: (product.productImageMedias ?? []).map((m) => m.id),
       relatedProductIds,
       taxClassId: product.taxClassId,
     },
@@ -168,6 +171,8 @@ export function toPayload(values: ProductFormValues, isNew: boolean): ProductPay
     isVisibleIndividually: values.isVisibleIndividually,
     stockTrackingEnabled: values.stockTrackingEnabled,
     ...values.kept,
+    thumbnailMediaId: values.thumbnail?.id ?? null,
+    productImageIds: values.images.map((image) => image.id),
     variations,
     productOptionValues,
     productOptionValueDisplays: toProductOptionValueDisplays(productOptionValues),
@@ -331,6 +336,26 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
               onChange={(e) => set({ [key]: e.target.checked })}
             />
           ))}
+        </Col>
+      </Row>
+
+      <Row className="g-3 mb-3">
+        <Col md={4}>
+          <ImageUpload
+            id="product-thumbnail"
+            label="Thumbnail"
+            images={values.thumbnail ? [values.thumbnail] : []}
+            onChange={(images) => set({ thumbnail: images[0] ?? null })}
+          />
+        </Col>
+        <Col md={8}>
+          <ImageUpload
+            id="product-images"
+            label="Product images"
+            multiple
+            images={values.images}
+            onChange={(images) => set({ images })}
+          />
         </Col>
       </Row>
 

@@ -20,6 +20,7 @@ import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
 import com.shopapp.product.viewmodel.product.ProductsGetVm;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -43,7 +44,8 @@ public class ProductService {
 
     public ProductFeatureGetVm getListFeaturedProducts(int pageNo, int pageSize) {
         Page<Product> productPage = productRepository.getFeaturedProduct(PageRequest.of(pageNo, pageSize));
-        return new ProductFeatureGetVm(productPage.map(this::toThumbnailGetVm).getContent(),
+        Map<Long, String> urls = thumbnailUrls(productPage.getContent());
+        return new ProductFeatureGetVm(productPage.map(product -> toThumbnailGetVm(product, urls)).getContent(),
             productPage.getTotalPages());
     }
 
@@ -52,16 +54,18 @@ public class ProductService {
         Page<Product> productPage = productRepository.findByProductNameAndCategorySlugAndPriceBetween(
             productName.trim().toLowerCase(), categorySlug.trim(), startPrice, endPrice,
             PageRequest.of(pageNo, pageSize));
-        return toProductsGetVm(productPage.map(this::toThumbnailGetVm));
+        Map<Long, String> urls = thumbnailUrls(productPage.getContent());
+        return toProductsGetVm(productPage.map(product -> toThumbnailGetVm(product, urls)));
     }
 
     public ProductListGetFromCategoryVm getProductsFromCategory(int pageNo, int pageSize, String categorySlug) {
         Category category = categoryRepository.findBySlug(categorySlug)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CATEGORY_NOT_FOUND, categorySlug));
-        Page<ProductThumbnailVm> page = productCategoryRepository
+        Page<Product> products = productCategoryRepository
             .findStorefrontByCategory(category, PageRequest.of(pageNo, pageSize))
-            .map(ProductCategory::getProduct)
-            .map(this::toThumbnailVm);
+            .map(ProductCategory::getProduct);
+        Map<Long, String> urls = thumbnailUrls(products.getContent());
+        Page<ProductThumbnailVm> page = products.map(product -> toThumbnailVm(product, urls));
         return new ProductListGetFromCategoryVm(page.getContent(), page.getNumber(), page.getSize(),
             (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
@@ -69,8 +73,10 @@ public class ProductService {
     public List<ProductThumbnailVm> getProductsByBrand(String brandSlug) {
         Brand brand = brandRepository.findBySlug(brandSlug)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.BRAND_NOT_FOUND, brandSlug));
-        return productRepository.findAllByBrandAndIsPublishedTrueAndIsVisibleIndividuallyTrueOrderByIdAsc(brand)
-            .stream().map(this::toThumbnailVm).toList();
+        List<Product> products =
+            productRepository.findAllByBrandAndIsPublishedTrueAndIsVisibleIndividuallyTrueOrderByIdAsc(brand);
+        Map<Long, String> urls = thumbnailUrls(products);
+        return products.stream().map(product -> toThumbnailVm(product, urls)).toList();
     }
 
     /**
@@ -78,16 +84,18 @@ public class ProductService {
      * unpublished parent, are left out (decisions.md 3a-33).
      */
     public List<ProductThumbnailGetVm> getFeaturedProductsById(List<Long> productIds) {
-        return productRepository.findStorefrontByIds(productIds).stream()
-            .map(this::toThumbnailGetVm)
-            .toList();
+        List<Product> products = productRepository.findStorefrontByIds(productIds);
+        Map<Long, String> urls = thumbnailUrls(products);
+        return products.stream().map(product -> toThumbnailGetVm(product, urls)).toList();
     }
 
     /** YAS GET /products: the order service's price lookup at checkout, orderable products only. */
     public ProductGetCheckoutListVm getProductCheckoutList(int pageNo, int pageSize, List<Long> productIds) {
         Page<Product> page = productRepository.findOrderableByIds(productIds, PageRequest.of(pageNo, pageSize));
+        Map<Long, String> urls = thumbnailUrls(page.getContent());
         return new ProductGetCheckoutListVm(
-            page.map(product -> ProductCheckoutListVm.fromModel(product, thumbnailUrl(product))).getContent(),
+            page.map(product -> ProductCheckoutListVm.fromModel(product,
+                MediaService.urlOf(urls, product.getThumbnailMediaId()))).getContent(),
             page.getNumber(), page.getSize(), (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
@@ -96,9 +104,10 @@ public class ProductService {
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
         Page<ProductRelated> relatedPage = productRelatedRepository.findStorefrontRelated(product,
             PageRequest.of(pageNo, pageSize));
-        List<ProductThumbnailGetVm> related = relatedPage.stream()
-            .map(ProductRelated::getRelatedProduct)
-            .map(this::toThumbnailGetVm)
+        List<Product> relatedProducts = relatedPage.stream().map(ProductRelated::getRelatedProduct).toList();
+        Map<Long, String> urls = thumbnailUrls(relatedProducts);
+        List<ProductThumbnailGetVm> related = relatedProducts.stream()
+            .map(relatedProduct -> toThumbnailGetVm(relatedProduct, urls))
             .toList();
         return new ProductsGetVm(related, relatedPage.getNumber(), relatedPage.getSize(),
             (int) relatedPage.getTotalElements(), relatedPage.getTotalPages(), relatedPage.isLast());
@@ -109,16 +118,18 @@ public class ProductService {
             page.getTotalPages(), page.isLast());
     }
 
-    private ProductThumbnailGetVm toThumbnailGetVm(Product product) {
+    private ProductThumbnailGetVm toThumbnailGetVm(Product product, Map<Long, String> urls) {
         return new ProductThumbnailGetVm(product.getId(), product.getName(), product.getSlug(),
-            thumbnailUrl(product), product.getPrice());
+            MediaService.urlOf(urls, product.getThumbnailMediaId()), product.getPrice());
     }
 
-    private ProductThumbnailVm toThumbnailVm(Product product) {
-        return new ProductThumbnailVm(product.getId(), product.getName(), product.getSlug(), thumbnailUrl(product));
+    private ProductThumbnailVm toThumbnailVm(Product product, Map<Long, String> urls) {
+        return new ProductThumbnailVm(product.getId(), product.getName(), product.getSlug(),
+            MediaService.urlOf(urls, product.getThumbnailMediaId()));
     }
 
-    private String thumbnailUrl(Product product) {
-        return mediaService.getMedia(product.getThumbnailMediaId()).url();
+    /** Thumbnail URLs of a page of products with one media-service call (decisions.md 3b-10). */
+    private Map<Long, String> thumbnailUrls(List<Product> products) {
+        return mediaService.getMediaUrls(products.stream().map(Product::getThumbnailMediaId).toList());
     }
 }

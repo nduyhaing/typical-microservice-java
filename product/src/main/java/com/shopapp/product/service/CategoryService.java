@@ -12,6 +12,7 @@ import com.shopapp.product.viewmodel.category.CategoryGetDetailVm;
 import com.shopapp.product.viewmodel.category.CategoryGetVm;
 import com.shopapp.product.viewmodel.category.CategoryPostVm;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +27,9 @@ public class CategoryService {
     private final MediaService mediaService;
 
     public List<CategoryGetVm> getCategories(String categoryName) {
-        return categoryRepository.findByNameContainingIgnoreCase(categoryName).stream()
-            .map(this::toVm)
-            .toList();
+        List<Category> categories = categoryRepository.findByNameContainingIgnoreCase(categoryName);
+        Map<Long, String> urls = mediaService.getMediaUrls(categories.stream().map(Category::getImageId).toList());
+        return categories.stream().map(category -> toVm(category, urls)).toList();
     }
 
     public CategoryGetDetailVm getCategoryById(Long id) {
@@ -128,9 +129,11 @@ public class CategoryService {
             : new ImageVm(category.getImageId(), mediaService.getMedia(category.getImageId()).url());
     }
 
-    private CategoryGetVm toVm(Category category) {
+    private CategoryGetVm toVm(Category category, Map<Long, String> urls) {
         Category parent = category.getParent();
         long parentId = parent == null ? -1 : parent.getId();
-        return new CategoryGetVm(category.getId(), category.getName(), category.getSlug(), parentId, image(category));
+        Long imageId = category.getImageId();
+        ImageVm image = imageId == null ? null : new ImageVm(imageId, MediaService.urlOf(urls, imageId));
+        return new CategoryGetVm(category.getId(), category.getName(), category.getSlug(), parentId, image);
     }
 }

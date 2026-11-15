@@ -34,7 +34,10 @@ function parseBody(text: string): unknown {
 async function request<T>(method: string, path: string, payload?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const init: RequestInit = { method, headers };
-  if (payload !== undefined) {
+  if (payload instanceof FormData) {
+    // multipart: the browser sets Content-Type with the boundary
+    init.body = payload;
+  } else if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(payload);
   }
@@ -49,6 +52,9 @@ async function request<T>(method: string, path: string, payload?: unknown): Prom
 export const get = <T>(path: string) => request<T>('GET', path);
 
 export const post = <T>(path: string, payload: unknown) => request<T>('POST', path, payload);
+
+/** Multipart POST (file uploads). */
+export const postForm = <T>(path: string, form: FormData) => request<T>('POST', path, form);
 
 export const put = <T>(path: string, payload: unknown) => request<T>('PUT', path, payload);
 

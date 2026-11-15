@@ -40,8 +40,9 @@ public class ProductDetailService {
     public ProductDetailGetVm getProductDetail(String slug) {
         Product product = productRepository.findBySlugAndIsPublishedTrueAndIsVisibleIndividuallyTrue(slug)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, slug));
+        Map<Long, String> urls = mediaService.getMediaUrls(imageIds(List.of(product)));
         List<String> imageUrls = product.getProductImages().stream()
-            .map(image -> mediaService.getMedia(image.getImageId()).url())
+            .map(image -> MediaService.urlOf(urls, image.getImageId()))
             .toList();
         return new ProductDetailGetVm(
             product.getId(),
@@ -57,7 +58,7 @@ public class ProductDetailService {
             product.isFeatured(),
             product.isHasOptions(),
             product.getPrice(),
-            mediaService.getMedia(product.getThumbnailMediaId()).url(),
+            MediaService.urlOf(urls, product.getThumbnailMediaId()),
             imageUrls);
     }
 
@@ -67,10 +68,7 @@ public class ProductDetailService {
         if (!parent.isHasOptions()) {
             return List.of();
         }
-        return parent.getProducts().stream()
-            .filter(Product::isPublished)
-            .map(this::toVariationVm)
-            .toList();
+        return toVariationVms(parent.getProducts().stream().filter(Product::isPublished).toList());
     }
 
     /** The distinct option/value pairs used by the product's variations (YAS de-duplicates the same way). */
@@ -101,15 +99,33 @@ public class ProductDetailService {
         return new ProductAttributeValueVm(value.getProductAttribute().getName(), value.getValue());
     }
 
-    /** Also used by the back office variation list. */
-    public ProductVariationGetVm toVariationVm(Product variation) {
+    /**
+     * Variation view models, their images resolved with one media-service call (decisions.md 3b-10). Also used by
+     * the back office variation list.
+     */
+    public List<ProductVariationGetVm> toVariationVms(List<Product> variations) {
+        Map<Long, String> urls = mediaService.getMediaUrls(imageIds(variations));
+        return variations.stream().map(variation -> toVariationVm(variation, urls)).toList();
+    }
+
+    /** Thumbnail and gallery media ids of the given products. */
+    static List<Long> imageIds(List<Product> products) {
+        List<Long> ids = new ArrayList<>();
+        for (Product product : products) {
+            ids.add(product.getThumbnailMediaId());
+            product.getProductImages().forEach(image -> ids.add(image.getImageId()));
+        }
+        return ids;
+    }
+
+    private ProductVariationGetVm toVariationVm(Product variation, Map<Long, String> urls) {
         Map<Long, String> options = productOptionCombinationRepository.findAllByProduct(variation).stream()
             .collect(Collectors.toMap(c -> c.getProductOption().getId(), ProductOptionCombination::getValue));
         Long thumbnailId = variation.getThumbnailMediaId();
         ImageVm thumbnail = thumbnailId == null ? null
-            : new ImageVm(thumbnailId, mediaService.getMedia(thumbnailId).url());
+            : new ImageVm(thumbnailId, MediaService.urlOf(urls, thumbnailId));
         List<ImageVm> images = variation.getProductImages().stream()
-            .map(image -> new ImageVm(image.getImageId(), mediaService.getMedia(image.getImageId()).url()))
+            .map(image -> new ImageVm(image.getImageId(), MediaService.urlOf(urls, image.getImageId())))
             .toList();
         return new ProductVariationGetVm(variation.getId(), variation.getName(), variation.getSlug(),
             variation.getSku(), variation.getGtin(), variation.getPrice(), thumbnail, images, options);

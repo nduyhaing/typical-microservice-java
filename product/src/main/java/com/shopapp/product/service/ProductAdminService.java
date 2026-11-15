@@ -94,8 +94,9 @@ public class ProductAdminService {
             .map(category -> new CategoryGetVm(category.getId(), category.getName(), category.getSlug(),
                 category.getParent() == null ? -1 : category.getParent().getId(), null))
             .toList();
+        Map<Long, String> urls = mediaService.getMediaUrls(ProductDetailService.imageIds(List.of(product)));
         List<ImageVm> images = product.getProductImages().stream()
-            .map(image -> new ImageVm(image.getImageId(), mediaService.getMedia(image.getImageId()).url()))
+            .map(image -> new ImageVm(image.getImageId(), MediaService.urlOf(urls, image.getImageId())))
             .toList();
         Long thumbnailId = product.getThumbnailMediaId();
         return ProductDetailVm.builder()
@@ -124,7 +125,7 @@ public class ProductAdminService {
             .metaKeyword(product.getMetaKeyword())
             .metaDescription(product.getMetaDescription())
             .thumbnailMedia(thumbnailId == null ? null
-                : new ImageVm(thumbnailId, mediaService.getMedia(thumbnailId).url()))
+                : new ImageVm(thumbnailId, MediaService.urlOf(urls, thumbnailId)))
             .productImageMedias(images)
             .taxClassId(product.getTaxClassId())
             .parentId(product.getParent() == null ? null : product.getParent().getId())
@@ -149,10 +150,8 @@ public class ProductAdminService {
         if (!parent.isHasOptions()) {
             return List.of();
         }
-        return parent.getProducts().stream()
-            .filter(Product::isPublished)
-            .map(productDetailService::toVariationVm)
-            .toList();
+        return productDetailService.toVariationVms(
+            parent.getProducts().stream().filter(Product::isPublished).toList());
     }
 
     @Transactional

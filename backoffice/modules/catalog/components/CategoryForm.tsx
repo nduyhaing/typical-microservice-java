@@ -6,6 +6,8 @@ import Form from 'react-bootstrap/Form';
 import ErrorMessage from '../../../common/components/ErrorMessage';
 import { useFetch } from '../../../common/hooks/useFetch';
 import { slugify } from '../../../common/utils/slug';
+import ImageUpload from '../../media/components/ImageUpload';
+import { UploadedImage } from '../../media/services/MediaService';
 import { CategoryDetail, CategoryPost } from '../models/Category';
 import { getCategories } from '../services/CategoryService';
 
@@ -47,6 +49,8 @@ const optional = (text: string) => (text.trim() ? text.trim() : null);
 /** Category create/edit form (YAS categories create/edit pages) with a parent select. */
 export default function CategoryForm({ category, onSubmit }: Props) {
   const [values, setValues] = useState<Values>(() => toValues(category));
+  // the current image is kept on save (YAS sent no imageId back, which cleared it)
+  const [image, setImage] = useState<UploadedImage | null>(category?.categoryImage ?? null);
   const [slugFollowsName, setSlugFollowsName] = useState(!category);
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState(false);
@@ -78,7 +82,7 @@ export default function CategoryForm({ category, onSubmit }: Props) {
         metaDescription: optional(values.metaDescription),
         displayOrder: values.displayOrder.trim() ? Number(values.displayOrder) : null,
         isPublish: values.isPublish,
-        imageId: null,
+        imageId: image?.id ?? null,
       });
     } catch (e) {
       setError(e);
@@ -155,6 +159,12 @@ export default function CategoryForm({ category, onSubmit }: Props) {
           onChange={(e) => set({ displayOrder: e.target.value })}
         />
       </Form.Group>
+      <ImageUpload
+        id="category-image"
+        label="Image"
+        images={image ? [image] : []}
+        onChange={(images) => setImage(images[0] ?? null)}
+      />
       <Form.Check
         className="mb-3"
         id="category-publish"

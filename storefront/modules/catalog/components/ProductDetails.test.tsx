@@ -134,3 +134,68 @@ describe('ProductDetails', () => {
     });
   });
 });
+
+describe('ProductDetails gallery', () => {
+  const mainImage = () => screen.getByRole('img', { name: 'Galaxy S24' });
+  const withImages: ProductDetail = {
+    ...galaxy,
+    thumbnailMediaUrl: 'http://m/thumb.png',
+    productImageMediaUrls: ['http://m/side.png', 'http://m/back.png'],
+  };
+
+  it('shows the thumbnail as main image and a strip of thumbnail + gallery images', () => {
+    render(<ProductDetails product={withImages} options={options} variations={variations} />);
+
+    expect(mainImage().getAttribute('src')).toBe('http://m/thumb.png');
+    const strip = screen.getAllByRole('button', { name: /^Show image/ });
+    expect(strip).toHaveLength(3);
+    expect(strip[0]).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('clicking a strip image switches the main image', async () => {
+    render(<ProductDetails product={withImages} options={options} variations={variations} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show image 3' }));
+
+    expect(mainImage().getAttribute('src')).toBe('http://m/back.png');
+    expect(screen.getByRole('button', { name: 'Show image 3' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Show image 1' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('gallery images without a thumbnail: the first one is the main image', () => {
+    render(
+      <ProductDetails
+        product={{ ...galaxy, productImageMediaUrls: ['http://m/side.png', 'http://m/back.png'] }}
+        options={options}
+        variations={variations}
+      />
+    );
+
+    expect(mainImage().getAttribute('src')).toBe('http://m/side.png');
+    expect(screen.getAllByRole('button', { name: /^Show image/ })).toHaveLength(2);
+  });
+
+  it('the selected variation thumbnail is shown when present', async () => {
+    const violet = { ...variations[1], thumbnail: { id: 9, url: 'http://m/violet.png' } };
+    render(<ProductDetails product={withImages} options={options} variations={[variations[0], violet]} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Show image 2' }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Violet' }));
+    expect(mainImage().getAttribute('src')).toBe('http://m/violet.png');
+
+    // a variation without its own thumbnail keeps the product image
+    await userEvent.click(screen.getByRole('button', { name: 'Black' }));
+    expect(mainImage().getAttribute('src')).toBe('http://m/thumb.png');
+
+    // the strip still switches while a variation is selected
+    await userEvent.click(screen.getByRole('button', { name: 'Show image 3' }));
+    expect(mainImage().getAttribute('src')).toBe('http://m/back.png');
+  });
+
+  it('no images: placeholder and no strip', () => {
+    render(<ProductDetails product={bare} options={[]} variations={[]} />);
+
+    expect(screen.getByRole('img', { name: 'USB-C Cable' }).getAttribute('src')).toContain(PLACEHOLDER_IMAGE);
+    expect(screen.queryByRole('button', { name: /^Show image/ })).not.toBeInTheDocument();
+  });
+});
