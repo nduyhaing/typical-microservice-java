@@ -15,7 +15,8 @@ The system is built in slices; each ends in something that runs end to end.
    - **3a Back office + catalog admin** — backoffice-bff (ADMIN only), back office app, brands/categories/products admin *(done)*
    - **3b Media** — media service, image upload in the back office, product images on the storefront *(done)*
    - **3c Inventory, tax, location** — stock, tax rates, saved addresses at checkout *(done — slice 3 complete)*
-4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
+4. **Events & search** — Debezium CDC → Kafka, search (Elasticsearch) with a storefront search page, reviews (rating),
+   coupons (promotion) at checkout *(done — slice 4 complete)*
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
 6. Operations: observability (OTel, Prometheus, Grafana, Loki, Tempo), Kubernetes, CI
 
@@ -58,8 +59,8 @@ Notes:
   Redis-backed session and relays the access token to the APIs; the browser only has a session cookie.
   Logging out also ends the Keycloak session.
 - **Checkout**: cart → Checkout → shipping address (saved or typed) → Place order. Orders are saved as "Pending
-  payment" with server-computed prices and tax; discounts, shipping fees and real payments come in later slices
-  (cash on delivery only for now).
+  payment" with server-computed prices and tax; coupons are applied at checkout (see [Coupons](#coupons)); shipping
+  fees and real payments come in later slices (cash on delivery only for now).
 - **Tax, stock and addresses** (slice 3c, `decisions.md` 3c-*): see [Tax, stock and addresses](#tax-stock-and-addresses).
 - **Images**: in the back office, the product form's thumbnail and gallery and the category form's image upload a
   file as soon as it is chosen (PNG, JPEG or GIF, up to **10 MB**; the type is checked by decoding the image,
@@ -69,7 +70,9 @@ Notes:
   pages still load and show placeholder images.
 - **Keycloak volume created before slice 2b?** Run `bash identity/scripts/apply-kc-admin-api-scope.sh` once
   (adds the admin-API audience scope the customer service needs; fresh volumes get it from the realm file).
-- **CDC (change data capture)**: see [CDC](#cdc-change-data-capture) below.
+- **CDC (change data capture)**: see [CDC](#cdc-change-data-capture) below. Search, reviews and coupons:
+  [Search](#search), [Reviews](#reviews), [Coupons](#coupons).
+- **Memory**: the stack needs about 7.5 GB of RAM; see [Resources](#resources).
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
   After changing it, run `docker compose down -v` to start fresh.
 - **Port 80 already in use?** In `.env` set `NGINX_HTTP_PORT=8000` **and**
@@ -202,6 +205,60 @@ dbproduct.public.product --consumer group "search"--> search --GET /storefront/p
 **Local development only — never reuse these anywhere else.**
 
 | What | URL | Credentials |
+## Reviews
+
+Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).
+
+- **Who can review**: a logged-in customer who has **ordered** the product (or one of its variations). Until payment
+  exists (slice 5) any order that is not cancelled, rejected or refunded counts. Others get "Only customers who
+  bought this product can review it" (400). Admin accounts cannot post reviews.
+- **One review per customer and product** (also enforced by the database; a second one is a 409 "You have already
+  reviewed this product"). There is no edit: delete your own review (`DELETE /rating/storefront/ratings/{id}`) and
+  write a new one. Product and customer names are copied when the review is written.
+- **Product page**: "Reviews" section with the average ("4.0 out of 5 (3 reviews)"), the newest reviews (5 per
+  page) and the write-a-review form (1–5 stars, up to 1000 characters). If rating is down the page still loads
+  and says "Reviews are not available right now."
+- **Back office**: *Catalog → Reviews* (`/reviews`) lists all reviews with filters (product, customer, message,
+  date range) and lets an admin delete any review; the dashboard shows the latest ratings.
+
+## Coupons
+
+Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59).
+
+- **Back office** *Promotion → Promotions* (`/promotion/manager-promotion`): name, coupon code (unique, letters,
+  digits, `-`, `_`; customers may type it in any case), **percentage** (0–100 %) or **fixed amount** discount, applies
+  to chosen **products, brands or categories**, start/end time, optional minimum order amount, **usage limit**
+  (unlimited or N uses in total) and an active flag.
+- **Discount rule**: only the order lines the coupon applies to are discounted. Percentage: each eligible line
+  gets `line subtotal × p %` (rounded half-up to cents). Fixed: the amount (at most the eligible subtotal) is shared
+  across the eligible lines in proportion to their subtotals.
+- **Tax after discount**: each line is taxed on its discounted amount;
+  `total = subtotal − discount + tax`. The checkout's "Coupon code" field asks the server for a preview; the
+  placed order is priced again the same way (the browser's numbers are never used).
+- **Usage limit**: one use is taken when the order is placed, atomically (two customers can't both take the last
+  use); if the order then fails the use is given back. A used-up coupon is refused with `PROMOTION_USED_UP`;
+  other reasons: `PROMOTION_NOT_FOUND` (unknown or inactive), `PROMOTION_NOT_STARTED`, `PROMOTION_EXPIRED`,
+  `PROMOTION_NOT_APPLICABLE`, `MINIMUM_ORDER_NOT_REACHED`.
+- **Deactivate instead of delete**: a coupon that has been used can't be deleted (orders refer to it); clear its
+  *Active* flag instead. Unused coupons can be deleted.
+- Not yet: cancelling an order does not give the use back (no cancel flow before slice 5); "My orders" shows the
+  total without a separate discount line.
+
+## Resources
+
+- The whole stack (about 25 containers, including Elasticsearch and Kafka Connect) uses about **7.5 GB of RAM**
+  when idle (measured with `docker stats` after slice 4): Elasticsearch ~0.8 GB (container limit 1 GB),
+  Keycloak ~0.65 GB, Kafka Connect ~0.5 GB, Kafka ~0.45 GB, each Spring service 0.3–0.45 GB.
+- Every Java service's JVM is capped in its Dockerfile
+  (`JAVA_TOOL_OPTIONS=-Xmx320m -Xss512k -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:+UseSerialGC`),
+  Keycloak at 768 MB heap and Kafka at 512 MB (`docker-compose.yml`); without the caps each JVM could grow to a
+  quarter of the Docker VM and the VM ran out of memory.
+- Each Spring service uses a **Hikari pool of 5** connections (`SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` in its
+  Dockerfile), Keycloak at most 20, and Postgres allows 200 connections, so the services sharing one Postgres no
+  longer run out of connections.
+- Give Docker (Docker Desktop / Rancher Desktop VM) **about 10 GB of free memory**: the stack plus `mvn verify`'s
+  Testcontainers (Postgres, Kafka, Elasticsearch) need it. Run one Testcontainers build at a time.
+
 |---|---|---|
 | Keycloak admin console | http://identity.shopapp.local/admin | `admin` / `admin` (master realm) |
 | Keycloak realm `shopapp` | http://identity.shopapp.local/realms/shopapp | users `admin`/`admin` (ADMIN), `customer`/`customer` (CUSTOMER) |
@@ -217,6 +274,10 @@ dbproduct.public.product --consumer group "search"--> search --GET /storefront/p
 | Location API | http://api.shopapp.local/location/storefront/countries (public lookups), .../location/storefront/addresses, .../location/backoffice/... | lookups public; addresses need a token; `backoffice` needs ADMIN |
 | Tax API | http://api.shopapp.local/tax/backoffice/tax-classes, .../tax/backoffice/tax-rates | ADMIN (order reads rates with the customer's token) |
 | Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
+| Storefront search page | http://storefront.shopapp.local/search?keyword=galaxy | public (header search box with suggestions) |
+| Rating API | http://api.shopapp.local/rating/storefront/ratings/products/{productId}, .../rating/storefront/ratings/product/{productId}/average-star, .../rating/backoffice/ratings | lists and averages public; posting/deleting own reviews needs CUSTOMER; `backoffice` ADMIN |
+| Promotion API | http://api.shopapp.local/promotion/backoffice/promotions, .../promotion/storefront/promotions/verify | `backoffice` ADMIN; `storefront` any logged-in user (order calls it with the customer's token) |
+| Back office: reviews, promotions | http://backoffice.shopapp.local/reviews, /promotion/manager-promotion | `admin` / `admin` |
 | Back office: location, tax, inventory | http://backoffice.shopapp.local/location/countries, /location/state-or-provinces, /tax/tax-classes, /tax/tax-rates, /inventory/warehouses, /inventory/warehouse-products, /inventory/warehouse-stocks | `admin` / `admin` |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |

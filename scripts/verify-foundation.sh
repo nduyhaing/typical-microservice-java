@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -572,7 +572,7 @@ S3C_LEFTOVER_CLASSES=""
 S3C_LOCK="${TMPDIR:-/tmp}/shopapp-smoke-3c.lock"
 S3C_LOCKED=""
 S3C_JAR=$(mktemp)
-trap 's3c_cleanup >/dev/null 2>&1 || true; s3c_unlock; rm -f "$COOKIE_JAR" "$ADMIN_JAR" "$S3C_JAR"' EXIT
+trap 's4_cleanup >/dev/null 2>&1 || true; s3c_cleanup >/dev/null 2>&1 || true; s3c_unlock; rm -f "$COOKIE_JAR" "$ADMIN_JAR" "$S3C_JAR"' EXIT
 
 # Two smoke runs at once would read each other's changes as the product's original values: one slice 3c run at a
 # time (a lock directory holding the owner's pid; a dead owner's lock is taken over), waiting up to 3 minutes.
@@ -877,6 +877,234 @@ check_slice3c() {
     s3c_unlock
 }
 
+# Slice 4 reviews and coupons. The customer's calls go through storefront-bff (in $S3C_JAR, logged in again), the
+# admin's through backoffice-bff. Cleanup (s4_cleanup, also from the EXIT trap): the review is deleted, the coupon
+# deactivated (a used promotion cannot be deleted); the coupon orders stay (orders cannot be deleted).
+S4_RATING_ID=""
+S4_PROMO_ID=""
+
+# Logs the customer into $S3C_JAR. Windows curl keeps its own copy of the jar (storefront_login's rm does not reach
+# it) and Keycloak may still have an SSO session, so "already logged in" also counts.
+s4_customer_login() {
+    storefront_login "$S3C_JAR" "$(url storefront "")" customer customer         || curl -s -b "$S3C_JAR" "$(url storefront /authentication)" | grep -q '"isAuthenticated":true'
+}
+
+s4_admin_login() {
+    [ "$(backoffice_auth_status "$ADMIN_JAR" "$(url backoffice "")" || true)" = "200" ] \
+        || backoffice_login "$ADMIN_JAR" "$(url backoffice "")" admin admin
+}
+
+# s4_retire_promotion <id>: deletes an unused promotion, deactivates a used one; prints what it did
+s4_retire_promotion() {
+    local id=$1 r detail
+    r=$(bo DELETE "/api/promotion/backoffice/promotions/$id")
+    if [ "$(status_of "$r")" = "204" ]; then echo "deleted"; return 0; fi
+    detail=$(body_of "$(bo GET "/api/promotion/backoffice/promotions/$id")")
+    r=$(bo PUT /api/promotion/backoffice/promotions "$(python -c "import json,sys
+d=json.loads(sys.argv[1]); d['isActive']=False; d.pop('usageCount', None); print(json.dumps(d))" "$detail" 2>/dev/null)")
+    if [ "$(status_of "$r")" = "200" ]; then echo "deactivated"; return 0; fi
+    return 1
+}
+
+s4_cleanup() {
+    local r
+    if [ -n "$S4_RATING_ID" ]; then
+        r=$(sf DELETE "/api/rating/storefront/ratings/$S4_RATING_ID")
+        if [ "$(status_of "$r")" = "204" ]; then pass "cleanup: customer deletes their review"; else fail "cleanup: delete review $S4_RATING_ID -> $(status_of "$r")"; fi
+        S4_RATING_ID=""
+    fi
+    if [ -n "$S4_PROMO_ID" ]; then
+        if r=$(s4_retire_promotion "$S4_PROMO_ID"); then pass "cleanup: coupon $r"; else fail "cleanup: coupon $S4_PROMO_ID still active (deactivate it in the back office)"; fi
+        S4_PROMO_ID=""
+    fi
+}
+
+# Slice 4 reviews (decisions.md 4-30..4-39): check_checkout_and_order orders Galaxy S24 Violet on every run, and a
+# variation's parent counts as bought (4-30), so the customer may review Galaxy S24.
+check_rating() {
+    local product_id sub customer_token r other_id html avg
+    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
+    sub=$(python -c "import base64,json,sys
+p=sys.argv[1].split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p + '=' * (-len(p) % 4)))['sub'])" \
+        "$customer_token" 2>/dev/null || true)
+    product_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-s24)" | json "d['id']")
+    if [ -z "$sub" ] || [ -z "$product_id" ] || ! s4_customer_login || ! s4_admin_login; then
+        fail "look up Galaxy S24, log the customer and the admin in (reviews)"
+        return
+    fi
+    # a review left by an interrupted run (one per customer and product, 4-32) is deleted first
+    for r in $(curl -s "$(url storefront "/api/rating/storefront/ratings/products/$product_id?pageSize=50")" \
+        | json "' '.join(str(x['id']) for x in d['ratingList'] if x['createdBy']=='$sub')"); do
+        echo "      note: deleting review #$r left by an earlier run"
+        sf DELETE "/api/rating/storefront/ratings/$r" >/dev/null
+    done
+    r=$(sf POST /api/rating/storefront/ratings "{\"productId\":$product_id,\"star\":4,\"content\":\"Smokereview$$\"}")
+    S4_RATING_ID=$(body_of "$r" | json "d['id']")
+    if [ "$(status_of "$r")" = "201" ] && [ -n "$S4_RATING_ID" ]; then
+        pass "customer reviews Galaxy S24, bought as the Violet variation (201)"
+    else
+        S4_RATING_ID=""
+        fail "customer reviews a bought product -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+        return
+    fi
+    r=$(sf POST /api/rating/storefront/ratings "{\"productId\":$product_id,\"star\":5,\"content\":\"Again\"}")
+    if [ "$(status_of "$r")" = "409" ]; then pass "a second review of the same product is a 409"; else fail "second review -> $(status_of "$r")"; fi
+    avg=$(curl -s "$(url storefront "/api/rating/storefront/ratings/product/$product_id/average-star")" || true)
+    if python -c "import sys;sys.exit(0 if float(sys.argv[1])>0 else 1)" "$avg" 2>/dev/null; then
+        pass "Galaxy S24 average is $avg stars"
+    else
+        fail "Galaxy S24 average '$avg', expected > 0"
+    fi
+    html=$(curl -s "$(url storefront /products/galaxy-s24)" || true)
+    if grep -qF 'Reviews</h2>' <<< "$html" && grep -qF 'data-testid="average-rating"' <<< "$html"; then
+        pass "product page shows the Reviews section with the average"
+    else
+        fail "product page /products/galaxy-s24 has no Reviews section with an average"
+    fi
+    if body_of "$(bo GET "/api/rating/backoffice/ratings?message=Smokereview$$")" | grep -q "\"id\":$S4_RATING_ID,"; then
+        pass "admin finds the review in the back-office list"
+    else
+        fail "admin back-office review list does not show review #$S4_RATING_ID"
+    fi
+    # a product the customer never ordered: the first listed one order says is not bought
+    other_id=""
+    for r in $(curl -s "$(url storefront '/api/product/storefront/products?pageSize=100')" \
+        | json "' '.join(str(p['id']) for p in d['productContent'])"); do
+        if [ "$(body_of "$(sf GET "/api/order/storefront/orders/completed?productId=$r")" | json "d['isPresent']")" = "False" ]; then
+            other_id=$r
+            break
+        fi
+    done
+    if [ -z "$other_id" ]; then
+        fail "no published product the customer has not ordered (cannot check the not-bought rule)"
+    else
+        r=$(sf POST /api/rating/storefront/ratings "{\"productId\":$other_id,\"star\":3,\"content\":\"Never bought\"}")
+        if [ "$(status_of "$r")" = "400" ] && grep -q "Only customers who bought" <<< "$r"; then
+            pass "reviewing a product never bought (#$other_id) is a 400 (only buyers may review)"
+        else
+            fail "review of a product never bought -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+        fi
+    fi
+    r=$(sf DELETE "/api/rating/storefront/ratings/$S4_RATING_ID")
+    if [ "$(status_of "$r")" = "204" ]; then
+        S4_RATING_ID=""
+        pass "customer deletes their own review (204)"
+    else
+        fail "customer deletes their own review -> $(status_of "$r")"
+    fi
+    check_http "a customer cannot list all reviews" "$(url api /rating/backoffice/ratings)" 403 \
+        -H "Authorization: Bearer $customer_token"
+    check_body "back office reviews page" "$(url backoffice /reviews)" 200 'id="__next"' -b "$ADMIN_JAR"
+}
+
+# Slice 4 coupons (decisions.md 4-40..4-59): a 10 % coupon for Galaxy S24 Violet only, usage limit 1. The checkout
+# also has a USB-C Cable, which gets no discount. Galaxy S24 (the Violet's parent; a variation has no admin detail)
+# and the cable keep their stock and tax class (checked).
+check_promotion() {
+    local violet_id cable_id s24_id vn_id code dates body r checkout_id preview order address state_before state_after
+    s24_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-s24)" | json "d['id']")
+    violet_id=$(curl -s "$(url storefront "/api/product/storefront/product-variations/$s24_id")" \
+        | json "next(v['id'] for v in d if v['slug']=='galaxy-s24-violet')")
+    cable_id=$(curl -s "$(url storefront /api/product/storefront/product/usb-c-cable)" | json "d['id']")
+    vn_id=$(curl -s "$(url storefront /api/location/storefront/countries)" | json "next(c['id'] for c in d if c['code2']=='VN')")
+    if [ -z "$violet_id" ] || [ -z "$cable_id" ] || [ -z "$vn_id" ]; then
+        fail "look up Galaxy S24 Violet, the USB-C Cable and Viet Nam (coupons)"
+        return
+    fi
+    if ! s4_admin_login || ! s4_customer_login; then
+        fail "admin and customer logins (coupons)"
+        return
+    fi
+    # coupons left active by an interrupted run
+    for r in $(body_of "$(bo GET '/api/promotion/backoffice/promotions?couponCode=SMOKE&pageSize=100')" \
+        | json "' '.join(str(p['id']) for p in d['promotionDetailVmList'] if p['isActive'] and p['couponCode'].startswith('SMOKE'))"); do
+        echo "      note: coupon #$r left by an earlier run $(s4_retire_promotion "$r" || echo 'could not be retired')"
+    done
+    product_state() {
+        local id
+        for id in "$s24_id" "$cable_id"; do
+            body_of "$(bo GET "/api/product/backoffice/products/$id")" \
+                | json "f\"{d['id']}:{d['stockQuantity']}:{d['taxClassId']}:{d['stockTrackingEnabled']}\""
+        done | paste -sd ' ' -
+    }
+    state_before=$(product_state)
+
+    code="SMOKE$(date +%s)"
+    dates=$(python -c "from datetime import datetime,timedelta,timezone as t
+n=datetime.now(t.utc).replace(microsecond=0); f=lambda x:x.isoformat().replace('+00:00','Z')
+print(f(n-timedelta(minutes=5)), f(n+timedelta(days=1)))")
+    body="{\"name\":\"Smoke coupon $code\",\"slug\":\"$(tr 'A-Z' 'a-z' <<< "$code")\",\"description\":\"verify-foundation.sh\",\"couponCode\":\"$code\",\"discountType\":\"PERCENTAGE\",\"discountPercentage\":10,\"discountAmount\":null,\"usageType\":\"LIMITED\",\"usageLimit\":1,\"minimumOrderPurchaseAmount\":0,\"isActive\":true,\"startDate\":\"${dates% *}\",\"endDate\":\"${dates#* }\",\"applyTo\":\"PRODUCT\",\"productIds\":[$violet_id],\"brandIds\":[],\"categoryIds\":[]}"
+    r=$(bo POST /api/promotion/backoffice/promotions "$body")
+    S4_PROMO_ID=$(body_of "$r" | json "d['id']")
+    if [ "$(status_of "$r")" = "201" ] && [ -n "$S4_PROMO_ID" ]; then
+        pass "admin creates coupon $code (10 % on Galaxy S24 Violet, usage limit 1)"
+    else
+        S4_PROMO_ID=""
+        fail "admin creates a coupon -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+        return
+    fi
+
+    address="{\"contactName\":\"Smoke Coupon\",\"phone\":\"0123456789\",\"addressLine1\":\"3 Smoke St\",\"city\":\"Ho Chi Minh City\",\"countryId\":$vn_id}"
+    checkout_id=$(body_of "$(sf POST /api/order/storefront/checkouts \
+        "{\"checkoutItemPostVms\":[{\"productId\":$violet_id,\"quantity\":1},{\"productId\":$cable_id,\"quantity\":1}]}")" | json "d['id']")
+    preview=$(body_of "$(sf POST /api/order/storefront/orders/preview \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressPostVm\":$address,\"couponCode\":\"$(tr 'A-Z' 'a-z' <<< "$code")\"}")")
+    if python -c "import json,sys
+from decimal import Decimal as D, ROUND_HALF_UP
+p=json.loads(sys.argv[1]); v=int(sys.argv[2]); c=int(sys.argv[3])
+line={i['productId']: i for i in p['items']}
+want=(D(str(line[v]['subtotal']))*D('0.10')).quantize(D('0.01'), ROUND_HALF_UP)
+sys.exit(0 if want>0 and D(str(line[v]['discountAmount']))==want and D(str(line[c]['discountAmount']))==0
+         and D(str(p['discount']))==want and p['couponCode']==sys.argv[4]
+         and D(str(p['total']))==D(str(p['subtotal']))-want+D(str(p['totalTax'])) else 1)" \
+        "$preview" "$violet_id" "$cable_id" "$code" 2>/dev/null; then
+        pass "checkout preview with the coupon: discount $(json "d['discount']" <<< "$preview") = 10 % of the Violet line only"
+    else
+        fail "checkout preview with the coupon: ${preview:0:300}"
+    fi
+    order=$(body_of "$(sf POST /api/order/storefront/orders \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressPostVm\":$address,\"paymentMethod\":\"COD\",\"couponCode\":\"$code\"}")")
+    if python -c "import json,sys
+from decimal import Decimal as D
+o=json.loads(sys.argv[1]); p=json.loads(sys.argv[2])
+sys.exit(0 if o.get('couponCode')==p['couponCode'] and D(str(o['discount']))==D(str(p['discount']))
+         and D(str(o['totalPrice']))==D(str(p['total'])) else 1)" "$order" "$preview" 2>/dev/null; then
+        pass "order #$(json "d['id']" <<< "$order") placed with the coupon at the preview's total ($(json "d['totalPrice']" <<< "$order"))"
+    else
+        fail "order with the coupon: ${order:0:300}"
+    fi
+    r=$(body_of "$(bo GET "/api/promotion/backoffice/promotions/$S4_PROMO_ID")" | json "d['usageCount']")
+    if [ "$r" = "1" ]; then pass "coupon usage is 1 after the order"; else fail "coupon usage is '$r' after the order, expected 1"; fi
+    checkout_id=$(body_of "$(sf POST /api/order/storefront/checkouts \
+        "{\"checkoutItemPostVms\":[{\"productId\":$violet_id,\"quantity\":1}]}")" | json "d['id']")
+    r=$(sf POST /api/order/storefront/orders \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressPostVm\":$address,\"paymentMethod\":\"COD\",\"couponCode\":\"$code\"}")
+    if [ "$(status_of "$r")" = "400" ] && [ "$(body_of "$r" | json "d['title']")" = "PROMOTION_USED_UP" ]; then
+        pass "a second order with the limit-1 coupon is a 400 PROMOTION_USED_UP"
+    else
+        fail "second order with the used coupon -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+    fi
+    state_after=$(product_state)
+    if [ "$state_after" = "$state_before" ] && [ "$(wc -w <<< "$state_before")" = "2" ]; then
+        pass "Galaxy S24 (Violet's parent) and USB-C Cable keep their stock and tax class (id:stock:taxClass:tracked $state_after)"
+    else
+        fail "product state changed by the coupon check: before '$state_before', after '$state_after'"
+    fi
+    r=$(s4_retire_promotion "$S4_PROMO_ID") && S4_PROMO_ID=""
+    if [ -z "$S4_PROMO_ID" ] && [ "$r" = "deactivated" ]; then pass "admin deactivates the used coupon"; else fail "deactivate the used coupon -> ${r:-failed}"; fi
+    check_body "back office promotions page" "$(url backoffice /promotion/manager-promotion)" 200 'id="__next"' -b "$ADMIN_JAR"
+}
+
+check_slice4() {
+    check_rating
+    check_promotion
+    s4_cleanup
+    curl -s -o /dev/null -L -b "$S3C_JAR" -c "$S3C_JAR" -X POST "$(url storefront /logout)" || true
+    check_body "storefront search page lists Galaxy phones" "$(url storefront '/search?keyword=galaxy')" 200 \
+        'href="/products/galaxy-'
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -894,6 +1122,7 @@ run_checks() {
     check_slice3c
     check_cdc
     check_search
+    check_slice4
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"
@@ -903,7 +1132,19 @@ if check_hosts_resolve; then
     if [ "${1:-}" = "--restart" ]; then
         echo "Restarting the stack (docker compose down && up, volumes kept)..."
         docker compose down >/dev/null 2>&1
-        docker compose up -d --wait >/dev/null 2>&1 || true
+        # `up --wait` stops waiting (and starting) as soon as any container fails, also one this script does not
+        # check (a service still under development) or after a Docker VM hiccup ("timed out dialing Hyper-V
+        # socket"): then start the checked services and give them up to 5 minutes to become healthy
+        if ! docker compose up -d --wait >/dev/null 2>&1; then
+            docker compose up -d "${SERVICES[@]}" >/dev/null 2>&1 || true
+            deadline=$((SECONDS + 300))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+                statuses=$(docker compose ps "${SERVICES[@]}" --format '{{.Status}}' 2>/dev/null || true)
+                [ "$(grep -c '^Up' <<< "$statuses")" -ge "${#SERVICES[@]}" ] \
+                    && ! grep -qE 'starting|unhealthy' <<< "$statuses" && break
+                sleep 5
+            done
+        fi
         check_services_healthy
         check_token
     fi
