@@ -13,7 +13,7 @@ The system is built in slices; each ends in something that runs end to end.
    - **2c Checkout** — order service, checkout with a typed-in address, "My orders" *(done — slice 2 complete)*
 3. Back office, in three steps:
    - **3a Back office + catalog admin** — backoffice-bff (ADMIN only), back office app, brands/categories/products admin *(done)*
-   - 3b Media — image upload, product images
+   - **3b Media** — media service, image upload in the back office, product images on the storefront *(done)*
    - 3c Inventory, tax, location — stock, tax rates, saved addresses at checkout
 4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
@@ -60,6 +60,12 @@ Notes:
 - **Checkout**: cart → Checkout → shipping address → Place order. Orders are saved as "Pending payment" with
   server-computed prices; tax, discounts, shipping fees and real payments come in later slices (cash on delivery
   only for now).
+- **Images**: in the back office, the product form's thumbnail and gallery and the category form's image upload a
+  file as soon as it is chosen (PNG, JPEG or GIF, up to **10 MB**; the type is checked by decoding the image,
+  not by its name). Images are served by the media service at
+  `http://api.shopapp.local:80/media/medias/{id}/file/{fileName}` (public, cached for a day). Files live on the
+  Docker volume `media-data` (`docker compose down -v` deletes them). If the media service is down, product
+  pages still load and show placeholder images.
 - **Keycloak volume created before slice 2b?** Run `bash identity/scripts/apply-kc-admin-api-scope.sh` once
   (adds the admin-API audience scope the customer service needs; fresh volumes get it from the realm file).
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
@@ -89,6 +95,7 @@ Notes:
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
 | Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
+| Media API / images | http://api.shopapp.local/media/medias/{id}, .../medias/{id}/file/{fileName} | GETs public; upload/delete need ADMIN |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |
 

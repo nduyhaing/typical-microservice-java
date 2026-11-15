@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order media storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -297,6 +297,107 @@ check_backoffice() {
     check_http "customer token cannot use admin endpoints" "$(url api /product/backoffice/brands)" 401
 }
 
+# Writes a 4x4 red PNG to stdout (generated, so the smoke test needs no binary fixture).
+smoke_png() {
+    python -c "import struct,sys,zlib
+chunk=lambda t,d:struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d))
+rows=(b'\x00'+b'\xff\x00\x00'*4)*4
+sys.stdout.buffer.write(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',4,4,8,2,0,0,0))
+    +chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b''))"
+}
+
+# Back office product update body from the admin detail (+ related products) with another thumbnail. The update
+# replaces categories, images and related products (3a-19), so the current ones are sent back; variations: null
+# leaves variations untouched. Usage: product_put_body <detail-json> <related-json> <thumbnail id or "">
+product_put_body() {
+    python - "$1" "$2" "$3" <<'EOF'
+import json, sys
+d, related, thumb = json.loads(sys.argv[1]), json.loads(sys.argv[2]), sys.argv[3]
+keep = ["name", "slug", "price", "isAllowedToOrder", "isPublished", "isFeatured", "stockTrackingEnabled", "brandId",
+        "shortDescription", "description", "specification", "sku", "gtin", "weight", "dimensionUnit", "length",
+        "width", "height", "metaTitle", "metaKeyword", "metaDescription", "taxClassId"]
+body = {k: d.get(k) for k in keep}
+body["isVisibleIndividually"] = d.get("isVisible")
+body["categoryIds"] = [c["id"] for c in d.get("categories") or []]
+body["productImageIds"] = [m["id"] for m in d.get("productImageMedias") or []]
+body["relatedProductIds"] = [p["id"] for p in related]
+body["thumbnailMediaId"] = int(thumb) if thumb else None
+print(json.dumps(body))
+EOF
+}
+
+# Slice 3b: media upload through backoffice-bff, product thumbnail from the media service on the storefront page.
+check_media() {
+    local base origin media_id status customer_token product_id detail related original_thumb media_url headers
+    base=$(url backoffice "")
+    origin="http://backoffice.${DOMAIN}${BASE_URL_SUFFIX}"
+    if [ "$(backoffice_auth_status "$ADMIN_JAR" "$base" || true)" != "200" ] \
+        && ! backoffice_login "$ADMIN_JAR" "$base" admin admin; then
+        fail "admin login to the back office (media)"
+        return
+    fi
+    media_id=$(smoke_png | curl -s -b "$ADMIN_JAR" -H "Origin: $origin" -F caption=smoke \
+        -F 'multipartFile=@-;filename=smoke.png;type=image/png' "$(url backoffice /api/media/medias)" \
+        | python -c "import json,sys;m=json.load(sys.stdin);print(m['id'] if m.get('mediaType')=='image/png' else '')" \
+        2>/dev/null || true)
+    if [ -z "$media_id" ]; then
+        fail "admin uploads a PNG through the back office"
+        return
+    fi
+    pass "admin uploads a PNG through the back office (media #$media_id)"
+    status=$(echo 'not an image' | curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" \
+        -F 'multipartFile=@-;filename=fake.png;type=image/png' "$(url backoffice /api/media/medias)" || true)
+    if [ "$status" = "400" ]; then pass "a text file named .png is refused (400)"; else fail "text file named .png -> $status"; fi
+    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])" || true)
+    status=$(smoke_png | curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $customer_token" \
+        -F 'multipartFile=@-;filename=smoke.png' "$(url api /media/medias)" || true)
+    if [ "$status" = "403" ]; then pass "a customer token cannot upload media (403)"; else fail "customer upload -> $status"; fi
+    # without a bearer header Spring's CSRF check refuses first (403, 3b-2); a bad token is a 401
+    status=$(smoke_png | curl -s -o /dev/null -w '%{http_code}' -F 'multipartFile=@-;filename=smoke.png' \
+        "$(url api /media/medias)" || true)
+    if [ "$status" = "403" ]; then pass "an anonymous upload is refused (403)"; else fail "anonymous upload -> $status"; fi
+    status=$(smoke_png | curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer not-a-token' \
+        -F 'multipartFile=@-;filename=smoke.png' "$(url api /media/medias)" || true)
+    if [ "$status" = "401" ]; then pass "an upload with an invalid token is a 401"; else fail "invalid token upload -> $status"; fi
+
+    product_id=$(curl -s "$(url storefront /api/product/storefront/product/galaxy-a55)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['id'])" || true)
+    detail=$(curl -s -b "$ADMIN_JAR" "$(url backoffice "/api/product/backoffice/products/$product_id")" || true)
+    related=$(curl -s -b "$ADMIN_JAR" "$(url backoffice "/api/product/backoffice/products/related-products/$product_id")" || true)
+    original_thumb=$(python -c "import json,sys;t=json.load(sys.stdin).get('thumbnailMedia');print(t['id'] if t else '')" \
+        <<< "$detail" 2>/dev/null || echo invalid)
+    if [ "$original_thumb" = "invalid" ] || ! python -c "import json,sys;json.load(sys.stdin)" <<< "$related" 2>/dev/null; then
+        fail "read the Galaxy A55 admin detail"
+    else
+        status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X PUT \
+            -H 'Content-Type: application/json' -d "$(product_put_body "$detail" "$related" "$media_id")" \
+            "$(url backoffice "/api/product/backoffice/products/$product_id")" || true)
+        if [ "$status" = "204" ]; then pass "admin sets the image as the Galaxy A55 thumbnail"; else fail "set thumbnail -> $status"; fi
+        media_url=$(curl -s "$(url api "/media/medias/$media_id")" \
+            | python -c "import json,sys;print(json.load(sys.stdin)['url'])" || true)
+        check_body "storefront product page shows the media URL" "$(url storefront /products/galaxy-a55)" 200 \
+            "${media_url:-no media url}"
+        headers=$(curl -s -o /dev/null -D - "${media_url:-$(url api /media/none)}" | tr -d '\r' || true)
+        if grep -q '^HTTP/[0-9.]* 200' <<< "$headers" && grep -qi '^content-type: image/png' <<< "$headers"; then
+            pass "media file URL answers 200 image/png"
+        else
+            fail "media file URL $media_url does not answer 200 image/png"
+        fi
+        status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X PUT \
+            -H 'Content-Type: application/json' -d "$(product_put_body "$detail" "$related" "$original_thumb")" \
+            "$(url backoffice "/api/product/backoffice/products/$product_id")" || true)
+        if [ "$status" = "204" ]; then pass "restore the Galaxy A55 thumbnail"; else fail "restore thumbnail -> $status"; fi
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X DELETE \
+        "$(url backoffice "/api/media/medias/$media_id")" || true)
+    case "$status" in
+        200|204) pass "admin deletes the uploaded media ($status)" ;;
+        *) fail "delete uploaded media -> $status" ;;
+    esac
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -310,6 +411,7 @@ run_checks() {
     check_storefront
     check_login_and_cart
     check_backoffice
+    check_media
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"
