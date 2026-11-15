@@ -130,6 +130,18 @@ public class ProductAdminService {
             .build();
     }
 
+    /**
+     * YAS GET /backoffice/products/related-products/{id}: all related products, published or not, so the back office
+     * can keep them when it saves a product (an update replaces the related list, decisions.md 3a-19, 3a-30).
+     */
+    public List<ProductListVm> getRelatedProducts(Long id) {
+        Product product = productRepository.findById(id)
+            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
+        return product.getRelatedProducts().stream()
+            .map(related -> ProductListVm.fromModel(related.getRelatedProduct()))
+            .toList();
+    }
+
     /** The parent's variations that were not deleted, whether or not the parent is published. */
     public List<ProductVariationGetVm> getVariations(Long parentId) {
         Product parent = findProduct(parentId);

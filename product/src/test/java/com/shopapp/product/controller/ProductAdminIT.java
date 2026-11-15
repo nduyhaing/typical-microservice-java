@@ -461,4 +461,24 @@ class ProductAdminIT extends AbstractStorefrontIT {
         mockMvc.perform(get("/backoffice/products")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/backoffice/product-options")).andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void relatedProducts_backoffice_includeUnpublished() throws Exception {
+        Product draft = fixtures.product("Draft phone", "draft-phone", 100);
+        draft.setPublished(false);
+        fixtures.save(draft);
+        Product cable = fixtures.product("Cable", "cable", 10);
+        Product hiddenCase = fixtures.product("Hidden case", "hidden-case", 5);
+        hiddenCase.setPublished(false);
+        fixtures.save(hiddenCase);
+        fixtures.related(draft, cable);
+        fixtures.related(draft, hiddenCase);
+
+        mockMvc.perform(get("/backoffice/products/related-products/{id}", draft.getId()).with(admin()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].slug").value(org.hamcrest.Matchers.containsInAnyOrder("cable", "hidden-case")));
+        mockMvc.perform(get("/backoffice/products/related-products/{id}", draft.getId()).with(customer()))
+            .andExpect(status().isForbidden());
+    }
 }
+

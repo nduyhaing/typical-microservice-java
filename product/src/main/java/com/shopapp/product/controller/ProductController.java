@@ -10,6 +10,7 @@ import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductGetDetailVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductListGetVm;
+import com.shopapp.product.viewmodel.product.ProductListVm;
 import com.shopapp.product.viewmodel.product.ProductPostVm;
 import com.shopapp.product.viewmodel.product.ProductPutVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
@@ -161,6 +162,11 @@ public class ProductController {
     public ResponseEntity<List<ProductOptionCombinationGetVm>> listProductOptionValueOfProduct(
         @PathVariable("productId") Long productId) {
         return ResponseEntity.ok(productDetailService.getOptionValues(productId));
+    }
+
+    @GetMapping("/backoffice/products/related-products/{id}")
+    public ResponseEntity<List<ProductListVm>> getRelatedProductsBackoffice(@PathVariable Long id) {
+        return ResponseEntity.ok(productAdminService.getRelatedProducts(id));
     }
 
     @GetMapping("/storefront/products/related-products/{id}")
