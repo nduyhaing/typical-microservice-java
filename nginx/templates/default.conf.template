@@ -138,6 +138,18 @@ server {
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
+    # search is public; nginx does not wait for it, so Elasticsearch down never keeps the shop from starting (4-18)
+    location /search/ {
+        set $upstream_search search:8080;
+        proxy_pass http://$upstream_search;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
     location /promotion/ {
         set $upstream_promotion promotion:8080;
         proxy_pass http://$upstream_promotion;

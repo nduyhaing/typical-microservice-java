@@ -7,6 +7,7 @@ import com.shopapp.product.service.ProductService;
 import com.shopapp.product.service.ProductStockService;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
 import com.shopapp.product.viewmodel.product.ProductDetailVm;
+import com.shopapp.product.viewmodel.product.ProductEsDetailVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductGetDetailVm;
@@ -164,6 +165,12 @@ public class ProductController {
     @GetMapping("/storefront/product/{slug}")
     public ResponseEntity<ProductDetailGetVm> getProductDetail(@PathVariable("slug") String slug) {
         return ResponseEntity.ok(productDetailService.getProductDetail(slug));
+    }
+
+    /** YAS: the search service's indexing read; 404 unless published and visible individually (4-10). */
+    @GetMapping("/storefront/products-es/{productId}")
+    public ResponseEntity<ProductEsDetailVm> getProductEsDetailById(@PathVariable long productId) {
+        return ResponseEntity.ok(productDetailService.getProductEsDetail(productId));
     }
 
     @GetMapping("/storefront/product-variations/{id}")

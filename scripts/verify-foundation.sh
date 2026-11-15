@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect redis product cart customer order media location tax inventory storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -492,6 +492,66 @@ check_cdc() {
     if [ "$status" = "204" ]; then pass "restore the Galaxy A55 name"; else fail "restore the Galaxy A55 name '$original' -> $status (fix by hand)"; fi
 }
 
+# Slice 4 search (decisions.md 4-19): the index is filled from the CDC topic, hidden products are never found, and an
+# admin rename reaches the search results within 30 s. The name is put back afterwards.
+check_search() {
+    local body total token product_id detail related original marker thumb status deadline found
+    body=$(curl -s "$(url api '/search/storefront/catalog-search?keyword=galaxy')" || true)
+    total=$(python -c "import json,sys;d=json.load(sys.stdin);print(d['totalElements'])" <<< "$body" 2>/dev/null || true)
+    if [ -n "$total" ] && [ "$total" -gt 0 ] && grep -q '"name":"Galaxy' <<< "$body"; then
+        pass "search 'galaxy' finds $total Samsung phones"
+    else
+        fail "search 'galaxy' returned no products (docker compose logs search elasticsearch)"
+        return
+    fi
+    check_body "search suggestions" "$(url api '/search/storefront/search_suggest?keyword=gala')" 200 '"name":"Galaxy'
+    check_body "unpublished product is never found" "$(url api '/search/storefront/catalog-search?keyword=prototype')" \
+        200 '"totalElements":0'
+    check_http "search page size is bounded" "$(url api '/search/storefront/catalog-search?size=1000')" 400
+    token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=admin -d password=admin \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true)
+    product_id=$(curl -s "$(url api /product/storefront/product/galaxy-a55)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
+    detail=$(curl -s -H "Authorization: Bearer $token" "$(url api "/product/backoffice/products/$product_id")" || true)
+    related=$(curl -s -H "Authorization: Bearer $token" \
+        "$(url api "/product/backoffice/products/related-products/$product_id")" || true)
+    original=$(python -c "import json,sys;print(json.load(sys.stdin)['name'])" <<< "$detail" 2>/dev/null || true)
+    if [ -z "$product_id" ] || [ -z "$original" ]; then
+        fail "read the Galaxy A55 admin detail (search)"
+        return
+    fi
+    thumb=$(python -c "import json,sys;t=json.load(sys.stdin).get('thumbnailMedia');print(t['id'] if t else '')" <<< "$detail")
+    marker="Searchsmoke$$"
+    search_put_name() {
+        local put
+        put=$(product_put_body "$detail" "$related" "$thumb" \
+            | python -c "import json,sys;b=json.load(sys.stdin);b['name']=sys.argv[1];print(json.dumps(b))" "$1")
+        curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' -d "$put" "$(url api "/product/backoffice/products/$product_id")" || true
+    }
+    status=$(search_put_name "$original $marker")
+    if [ "$status" != "204" ]; then
+        fail "admin renames Galaxy A55 for the search check -> $status"
+        return
+    fi
+    deadline=$((SECONDS + 30))
+    found=""
+    while [ -z "$found" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        found=$(curl -s "$(url api "/search/storefront/catalog-search?keyword=$marker")" \
+            | python -c "import json,sys;print(','.join(str(p['id']) for p in json.load(sys.stdin)['products']))" \
+            2>/dev/null || true)
+        [ "$found" = "$product_id" ] || { found=""; sleep 2; }
+    done
+    if [ -n "$found" ]; then
+        pass "an admin rename is found by search within 30 s (CDC -> search)"
+    else
+        fail "search did not find the renamed product $product_id within 30 s"
+    fi
+    status=$(search_put_name "$original")
+    if [ "$status" = "204" ]; then pass "restore the Galaxy A55 name"; else fail "restore the Galaxy A55 name '$original' -> $status (fix by hand)"; fi
+}
+
 # Slice 3c: tax, stock and a saved address at checkout, end to end. Admin calls go through backoffice-bff, the
 # customer's through storefront-bff. Everything is put back afterwards (s3c_cleanup, also from the EXIT trap); only
 # the placed order stays (orders cannot be deleted).
@@ -833,6 +893,7 @@ run_checks() {
     check_media
     check_slice3c
     check_cdc
+    check_search
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

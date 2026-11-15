@@ -26,6 +26,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Optional<Product> findByIdAndIsPublishedTrue(Long id);
 
+    /** Search indexing: the product only while the storefront shows it (decisions.md 4-10). */
+    Optional<Product> findByIdAndIsPublishedTrueAndIsVisibleIndividuallyTrue(Long id);
+
     /**
      * Storefront id lookups: published, and a variation also needs a published parent (its own flag only means
      * "not deleted", decisions.md 3a-17, 3a-33).

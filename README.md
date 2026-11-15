@@ -147,10 +147,55 @@ publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.p
   slot with
   `SELECT slot_name, wal_status, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) FROM pg_replication_slots`.
 - **Resources**: `kafka-connect` uses about 0.7–1 GB RAM (heap capped at 512 MB) and some CPU at start-up (it
-  takes 30–90 s to become healthy). If it is down, the shop keeps working; only the CDC topic (and later search
+  takes 30–90 s to become healthy). If it is down, the shop keeps working; only the CDC topic (and search
   updates) stops, and it catches up from its saved position when it comes back.
 - **Volume created before slice 4?** Nothing to do: `debezium-db-init` creates the user on the next `up`
   (`postgres_init.sql` only runs on an empty volume).
+
+## Search
+
+Product search runs on Elasticsearch, fed by the CDC topic (slice 4, `decisions.md` 4-10..4-19):
+
+```
+dbproduct.public.product --consumer group "search"--> search --GET /storefront/products-es/{id}--> product
+                                                         \--index / delete--> elasticsearch (index "product")
+```
+
+- **Endpoints** (public, through nginx `http://api.shopapp.local/search/...`):
+  `GET /storefront/catalog-search?keyword=&page=0&size=12&brand=&category=&attribute=&minPrice=&maxPrice=&sortType=DEFAULT|PRICE_ASC|PRICE_DESC`
+  (brand/category/attribute take comma-separated exact values; size 1..100; the answer has `products`, paging and
+  `aggregations.brands|categories|attributes` facet counts) and `GET /storefront/search_suggest?keyword=` (up to 10
+  names). Only published, individually visible products are ever returned. Back office:
+  `POST /backoffice/reindex` (ADMIN) re-reads every product.
+- **How the index is filled**: on every product event (`c`, `r`, `u`) search reads the product again from product
+  and indexes it; product answers 404 for unpublished or hidden products and search removes them; a delete (`d` or
+  the tombstone) removes the document. The consumer group starts from the earliest offset, so a new, empty index is
+  filled from Debezium's initial snapshot (`op=r` for every product) already on the topic. Updates that only change
+  the stock are not re-read when Debezium sends both row images (by default it does not, so they are re-read —
+  harmless). Duplicates and out-of-order events are safe: each event re-reads the current product, and the document
+  version is product's last-modified time, so an older read never overwrites a newer one.
+- **Failures**: product or Elasticsearch unavailable → the event is retried on retry topics (2 s, 10 s, 50 s), then
+  parked on `dbproduct.public.product-dlt` (Kafka UI → Topics). A malformed message goes to the DLT at once and
+  does not block the next one. After an outage, or after renaming a **brand or category** (those changes do not
+  produce product events, so search keeps the old name until each product changes), rebuild with
+  `curl -X POST -H "Authorization: Bearer $TOKEN" http://api.shopapp.local/search/backoffice/reindex`
+  (admin token, see "URLs and credentials").
+- **Elasticsearch**: `elasticsearch` service (`docker.elastic.co/elasticsearch/elasticsearch:9.4.8`, single node,
+  heap 512 MB, container limit 1 GB, volume `es-data`), security on, plain HTTP inside the compose network, **no
+  host port**. Users: `elastic` / `ELASTIC_PASSWORD` (superuser, for manual checks) and `SEARCH_ES_USERNAME` /
+  `SEARCH_ES_PASSWORD` (the service; role limited to the `product` index), both from `.env`. Query it with
+  `docker compose exec elasticsearch curl -s -u "elastic:$ELASTIC_PASSWORD" localhost:9200/product/_count`.
+- **Resources**: Elasticsearch about 0.8–1 GB RAM, 30–60 s to become healthy; `search` ~300–400 MB. If either is
+  down, the rest of the shop keeps working (nginx does not wait for search; the storefront search page shows an
+  error) and the smoke script reports it; on restart the consumer continues from its committed offset.
+- **Index empty although products exist?** The consumer group `search` only starts from the earliest offset when
+  it has no committed offset yet. Either `POST /backoffice/reindex`, or replay the topic:
+  `docker compose stop search`, then
+  `MSYS_NO_PATHCONV=1 docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group search --topic dbproduct.public.product --reset-offsets --to-earliest --execute`,
+  then `docker compose start search` (Kafka keeps the topic 7 days by default, so old snapshots may be gone).
+- **Start from scratch**: `docker compose stop search`, delete the index
+  (`docker compose exec elasticsearch curl -s -X DELETE -u "elastic:$ELASTIC_PASSWORD" localhost:9200/product`),
+  `docker compose start search`, then `POST /backoffice/reindex` (the topic may no longer hold every product).
 
 ## URLs and credentials
 
@@ -166,6 +211,7 @@ publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.p
 | **Back office** | http://backoffice.shopapp.local | `admin` / `admin` (ADMIN role only; customers get 403) |
 | API gateway | http://api.shopapp.local/product/storefront/... | product API; other paths return 404 |
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
+| Search API | http://api.shopapp.local/search/storefront/catalog-search?keyword=galaxy | public; `POST /search/backoffice/reindex` needs ADMIN |
 | Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
 | Media API / images | http://api.shopapp.local/media/medias/{id}, .../medias/{id}/file/{fileName} | GETs public; upload/delete need ADMIN |
 | Location API | http://api.shopapp.local/location/storefront/countries (public lookups), .../location/storefront/addresses, .../location/backoffice/... | lookups public; addresses need a token; `backoffice` needs ADMIN |

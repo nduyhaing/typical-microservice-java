@@ -1,0 +1,7 @@
+# File-realm roles (decisions.md 4-17). The search service may only manage and use the product index; the cluster
+# "monitor" privilege lets its health check read the cluster health.
+search_writer:
+  cluster: ["monitor"]
+  indices:
+    - names: ["product"]
+      privileges: ["all"]

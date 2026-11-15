@@ -11,6 +11,7 @@ import com.shopapp.product.repository.ProductRepository;
 import com.shopapp.product.utils.Constants;
 import com.shopapp.product.viewmodel.ImageVm;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
+import com.shopapp.product.viewmodel.product.ProductEsDetailVm;
 import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
 import com.shopapp.product.viewmodel.productattribute.ProductAttributeGroupGetVm;
 import com.shopapp.product.viewmodel.productattribute.ProductAttributeValueVm;
@@ -66,6 +67,38 @@ public class ProductDetailService {
             return new WithMedia<>(imageIds(List.of(product)), urls -> detail.withImageUrls(
                 MediaService.urlOf(urls, thumbnailId),
                 galleryIds.stream().map(id -> MediaService.urlOf(urls, id)).toList()));
+        });
+    }
+
+    /**
+     * YAS {@code getProductEsDetailById} for the search service. Public catalog data, so only a published, individually
+     * visible product is returned; anything else is 404, which search reads as "remove from the index"
+     * (decisions.md 4-10).
+     */
+    public ProductEsDetailVm getProductEsDetail(long id) {
+        return mediaUrlResolver.readThenResolve(() -> {
+            Product product = productRepository.findByIdAndIsPublishedTrueAndIsVisibleIndividuallyTrue(id)
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
+            Long thumbnailId = product.getThumbnailMediaId();
+            ProductEsDetailVm detail = new ProductEsDetailVm(
+                product.getId(),
+                product.getName(),
+                product.getSlug(),
+                product.getPrice(),
+                product.isPublished(),
+                product.isVisibleIndividually(),
+                product.isAllowedToOrder(),
+                product.isFeatured(),
+                thumbnailId,
+                "",
+                product.getBrand() == null ? null : product.getBrand().getName(),
+                product.getProductCategories().stream().map(pc -> pc.getCategory().getName()).toList(),
+                product.getAttributeValues().stream().map(value -> value.getProductAttribute().getName())
+                    .distinct().toList(),
+                product.getCreatedOn(),
+                product.getLastModifiedOn());
+            return new WithMedia<>(thumbnailId == null ? List.of() : List.of(thumbnailId),
+                urls -> detail.withThumbnailUrl(MediaService.urlOf(urls, thumbnailId)));
         });
     }
 

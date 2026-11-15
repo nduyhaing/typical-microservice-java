@@ -202,6 +202,61 @@ services:
     networks:
       - shopapp-network
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.8
+    # creates the search user (file realm) from .env, then starts Elasticsearch (decisions.md 4-17)
+    entrypoint: ["/bin/tini", "--", "/bin/bash", "/shopapp/entrypoint.sh"]
+    environment:
+      discovery.type: single-node
+      cluster.name: shopapp
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      # security on (YAS: off), plain HTTP inside the compose network, no host port
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD}
+      SEARCH_ES_USERNAME: ${SEARCH_ES_USERNAME}
+      SEARCH_ES_PASSWORD: ${SEARCH_ES_PASSWORD}
+      # dev machine: a nearly full Docker disk must not turn the index read-only
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+    mem_limit: 1g
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+      - ./docker/elasticsearch:/shopapp:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -u \"elastic:$${ELASTIC_PASSWORD}\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' | grep -qE '\"status\":\"(green|yellow)\"'"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks:
+      - shopapp-network
+
+  search:
+    build: ./search
+    image: shopapp/search:dev
+    environment:
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      ELASTICSEARCH_USERNAME: ${SEARCH_ES_USERNAME}
+      ELASTICSEARCH_PASSWORD: ${SEARCH_ES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # products-es detail (public) and the reindex list (admin's token), straight to the container
+      SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /search/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   product:
     build: ./product
     image: shopapp/product:dev
@@ -290,6 +345,8 @@ services:
       # tax rates and saved addresses at order time, straight to the containers (decisions.md 3c-44)
       SHOPAPP_SERVICES_TAX: http://tax:8080/tax
       SHOPAPP_SERVICES_LOCATION: http://location:8080/location
+      # coupon verify / apply-usage / release-usage, straight to the container (decisions.md 4-54)
+      SHOPAPP_SERVICES_PROMOTION: http://promotion:8080/promotion
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /order/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
       interval: 10s
@@ -593,3 +650,4 @@ volumes:
   kafka-data:
   redis-data:
   media-data:
+  es-data:
