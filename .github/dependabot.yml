@@ -1,0 +1,41 @@
+# Dependabot version updates. Minor and patch updates are grouped into one PR per ecosystem/directory set to keep the
+# noise down; major updates come as separate PRs.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      maven-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directories:
+      - /storefront
+      - /backoffice
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  # every top-level directory with a Dockerfile (services and apps)
+  - package-ecosystem: docker
+    directories:
+      - '/*'
+    schedule:
+      interval: weekly
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]

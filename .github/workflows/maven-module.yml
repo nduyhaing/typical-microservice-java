@@ -1,0 +1,56 @@
+# Reusable: build and test one Maven module (and the modules it depends on) - checkstyle, unit tests, integration
+# tests with Testcontainers (Docker is available on GitHub-hosted ubuntu runners), JaCoCo report.
+name: Maven module
+
+on:
+  workflow_call:
+    inputs:
+      module:
+        description: Maven module (directory) to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MODULE: ${{ inputs.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '27'
+          cache: maven
+
+      - name: mvn verify
+        run: mvn -B -ntp -pl "$MODULE" -am verify
+
+      - name: Upload JaCoCo report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jacoco-${{ inputs.module }}
+          path: ${{ inputs.module }}/target/site/jacoco/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload test reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-reports-${{ inputs.module }}
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+            **/target/checkstyle-result.xml
+          if-no-files-found: ignore
+          retention-days: 14

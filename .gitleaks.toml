@@ -1,0 +1,19 @@
+# gitleaks configuration (CI: .github/workflows/security.yml). Default rules plus ONE narrow allowlist for the
+# documented local-dev Keycloak client secrets (decisions.md F-*/P-*, 6-49): the three exact values, and only in the
+# two files that are meant to carry them. Any other secret, or these values in any other file, still fails the scan.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Local-dev Keycloak client secrets (dev-only, documented) in .env and the realm export"
+condition = "AND"
+paths = [
+  '''^\.env$''',
+  '''^identity/realm-export\.json$''',
+]
+regexTarget = "secret"
+regexes = [
+  '''^R8h9ZAofh4TCOp-iuGdzwfFA5orV_wHb$''',
+  '''^LbicBnJFx8lMtjpQJTUURytZoXAXAT30$''',
+  '''^QAHenhvlUDailIgh5tBuCmxbhNfkSygm$''',
+]
