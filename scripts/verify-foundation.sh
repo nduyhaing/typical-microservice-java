@@ -933,6 +933,16 @@ p=sys.argv[1].split('.')[1]; print(json.loads(base64.urlsafe_b64decode(p + '=' *
         fail "look up Galaxy S24, log the customer and the admin in (reviews)"
         return
     fi
+    # only a paid order counts as bought (5-3): the admin marks this run's Violet order paid (5-1)
+    local order_id
+    order_id=$(body_of "$(sf GET /api/order/storefront/orders/my-orders)" | json "next((str(o['id']) for o in d if o['orderStatus']=='PENDING_PAYMENT' and any('Violet' in i['productName'] for i in o['orderItemVms'])), '')")
+    if [ -n "$order_id" ]; then
+        r=$(bo PUT "/api/order/backoffice/orders/$order_id/status" '{"orderStatus":"PAID"}')
+        if [ "$(status_of "$r")" = "200" ]; then pass "admin marks order #$order_id paid (PENDING_PAYMENT -> PAID)"; else fail "admin marks order #$order_id paid -> $(status_of "$r") $(body_of "$r" | head -c 200)"; fi
+        # service-to-service endpoints never through the gateway (5-5)
+        r=$(curl -s -o /dev/null -w '%{http_code}' "$(url api "/order/internal/orders/$order_id")" || true)
+        if [ "$r" = "403" ]; then pass "nginx refuses /order/internal/... (403)"; else fail "nginx /order/internal/... -> $r (expected 403)"; fi
+    fi
     # a review left by an interrupted run (one per customer and product, 4-32) is deleted first
     for r in $(curl -s "$(url storefront "/api/rating/storefront/ratings/products/$product_id?pageSize=50")" \
         | json "' '.join(str(x['id']) for x in d['ratingList'] if x['createdBy']=='$sub')"); do
