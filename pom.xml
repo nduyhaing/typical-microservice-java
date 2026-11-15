@@ -33,6 +33,7 @@
         <module>rating</module>
         <module>search</module>
         <module>sampledata</module>
+        <module>recommendation</module>
     </modules>
 
     <properties>

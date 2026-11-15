@@ -2,7 +2,9 @@ name: shopapp
 
 services:
   postgres:
-    image: postgres:16.16
+    # postgres 16.16 on Debian trixie (same as postgres:16.16, so the data volume and collations carry over) plus
+    # the pgvector extension for recommendation's embeddings (decisions.md 5-46)
+    image: pgvector/pgvector:0.8.7-pg16-trixie
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -251,6 +253,37 @@ services:
       start_period: 30s
     depends_on:
       elasticsearch:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # similar products from local text embeddings (ONNX all-MiniLM-L6-v2 + pgvector), fed by the product CDC topic
+  # (decisions.md 5-40..5-49). The model (~90 MB) is downloaded from Hugging Face on the first start into the
+  # recommendation-model volume; nginx does not wait for this service
+  recommendation:
+    build: ./recommendation
+    image: shopapp/recommendation:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/recommendation
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # products-es and storefront detail (public) and the reindex list (admin's token), straight to the container
+      SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+    volumes:
+      - recommendation-model:/var/cache/shopapp/onnx-model
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /recommendation/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # the first start downloads the model
+      start_period: 120s
+    depends_on:
+      postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -687,3 +720,4 @@ volumes:
   redis-data:
   media-data:
   es-data:
+  recommendation-model:

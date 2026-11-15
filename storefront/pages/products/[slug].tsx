@@ -15,6 +15,12 @@ import { groupOptionValues } from '../../modules/catalog/utils/variation';
 import ProductReviews from '../../modules/rating/components/ProductReviews';
 import { ProductReviewsData } from '../../modules/rating/models/Rating';
 import { getAverageStar, getRatingsByProduct, REVIEWS_PAGE_SIZE } from '../../modules/rating/services/RatingService';
+import SimilarProducts from '../../modules/recommendation/components/SimilarProducts';
+import { SimilarProduct } from '../../modules/recommendation/models/SimilarProduct';
+import { getSimilarProducts } from '../../modules/recommendation/services/RecommendationService';
+
+/** How long the page waits for the recommendation service before rendering without similar products. */
+export const SIMILAR_PRODUCTS_TIMEOUT_MS = 1500;
 
 type Props = {
   product: ProductDetail;
@@ -22,6 +28,8 @@ type Props = {
   variations: ProductVariation[];
   /** null when the rating service could not be reached: the page renders without reviews. */
   reviews: ProductReviewsData | null;
+  /** empty when the recommendation service is down, slow or has nothing: the section is then hidden. */
+  similarProducts: SimilarProduct[];
 };
 
 /** The average and the first page of reviews; any failure is swallowed so the product page never fails on it. */
@@ -34,6 +42,16 @@ async function loadReviews(productId: number): Promise<ProductReviewsData | null
     return { average, ratings };
   } catch {
     return null;
+  }
+}
+
+/** Similar products within a short timeout; any failure (down, slow, odd answer) is an empty list. */
+async function loadSimilarProducts(productId: number): Promise<SimilarProduct[]> {
+  try {
+    const products = await getSimilarProducts(productId, AbortSignal.timeout(SIMILAR_PRODUCTS_TIMEOUT_MS));
+    return Array.isArray(products) ? products : [];
+  } catch {
+    return [];
   }
 }
 
@@ -52,22 +70,25 @@ export const getServerSideProps: GetServerSideProps<Props> = async ({ params }) 
     throw error;
   }
   if (!product.hasOptions) {
-    return { props: { product, options: [], variations: [], reviews: await loadReviews(product.id) } };
+    const [reviews, similarProducts] = await Promise.all([loadReviews(product.id), loadSimilarProducts(product.id)]);
+    return { props: { product, options: [], variations: [], reviews, similarProducts } };
   }
-  const [optionValues, variations, reviews] = await Promise.all([
+  const [optionValues, variations, reviews, similarProducts] = await Promise.all([
     getProductOptionValues(product.id),
     getProductVariationsByParentId(product.id),
     loadReviews(product.id),
+    loadSimilarProducts(product.id),
   ]);
-  return { props: { product, options: groupOptionValues(optionValues), variations, reviews } };
+  return { props: { product, options: groupOptionValues(optionValues), variations, reviews, similarProducts } };
 };
 
-export default function ProductPage({ product, options, variations, reviews }: Props) {
+export default function ProductPage({ product, options, variations, reviews, similarProducts }: Props) {
   return (
     <Layout title={product.name}>
       {/* keyed by product: client-side navigation to another product starts with fresh gallery/option/quantity state */}
       <ProductDetails key={product.id} product={product} options={options} variations={variations} />
       <ProductReviews key={`reviews-${product.id}`} productId={product.id} initial={reviews} />
+      <SimilarProducts key={`similar-${product.id}`} products={similarProducts} />
       <RelatedProducts productId={product.id} />
     </Layout>
   );

@@ -212,6 +212,38 @@ dbproduct.public.product --consumer group "search"--> search --GET /storefront/p
   (`docker compose exec elasticsearch curl -s -X DELETE -u "elastic:$ELASTIC_PASSWORD" localhost:9200/product`),
   `docker compose start search`, then `POST /backoffice/reindex` (the topic may no longer hold every product).
 
+## Recommendation
+
+The product page shows **Similar products**, computed from product text with a local embedding model (slice 5,
+`decisions.md` 5-40..5-49):
+
+```
+dbproduct.public.product --consumer group "recommendation"--> recommendation --products-es + product/{slug}--> product
+                                                                  \--embed (ONNX, in-process)--> postgres "recommendation"
+                                                                      (pgvector table product_embedding, HNSW cosine)
+```
+
+- **Model**: `sentence-transformers/all-MiniLM-L6-v2` (ONNX export, 384 dimensions) run by Spring AI's
+  `TransformersEmbeddingModel` on ONNX Runtime inside the service — no external AI service, nothing leaves the
+  machine. Downloaded once from Hugging Face on the first start (`model.onnx` 90 MB + `tokenizer.json` 0.5 MB,
+  pinned to a commit) into the `recommendation-model` volume; afterwards it starts offline.
+- **Text that is embedded**: `<categories>. <name>. Brand: <brand>. Categories: <categories>. <short description>.
+  <categories>` (HTML removed). Attribute values and the specification are left out: with them a laptop came second
+  for a phone ("Screen size: ..." matched). Only published, individually visible products are stored as
+  recommendable (variations never are).
+- **Resources**: 520–745 MiB RAM (`docker stats`; JVM heap 320 MB, ONNX Runtime native memory on top), image
+  944 MB, model volume 87 MB. Stop it if memory is tight: the product page simply has no similar products.
+- **Endpoint** (public): `GET http://api.shopapp.local/recommendation/embedding/product/{id}/similarity` → up to 8
+  `{id, name, slug, price, brandName, thumbnailUrl}`, nearest first, without the product itself; `[]` for an
+  unknown or unpublished product. `POST /recommendation/backoffice/reindex` (ADMIN) re-embeds every product.
+- **Sync and failures**: same rules as search — unpublish/hide removes at once without asking product, every other
+  event re-reads product, versions stop older reads from winning, product/Postgres down → retried in place until
+  they answer, malformed messages → `dbproduct.public.product-recommendation-dlt`. An empty table re-reads the
+  topic from the start (`docker compose restart recommendation`).
+- **Down?** The storefront waits at most 1.5 s and hides the section; nginx does not wait for the service.
+- **Postgres image**: `pgvector/pgvector:0.8.7-pg16-trixie` (PostgreSQL 16.16 on the same Debian as
+  `postgres:16.16`, plus the `vector` extension); the existing `postgres-data` volume works unchanged.
+
 ## Reviews
 
 Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).
@@ -282,6 +314,7 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
 | Tax API | http://api.shopapp.local/tax/backoffice/tax-classes, .../tax/backoffice/tax-rates | ADMIN (order reads rates with the customer's token) |
 | Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
 | Storefront search page | http://storefront.shopapp.local/search?keyword=galaxy | public (header search box with suggestions) |
+| Recommendation API | http://api.shopapp.local/recommendation/embedding/product/{id}/similarity | public; `POST /recommendation/backoffice/reindex` needs ADMIN |
 | Rating API | http://api.shopapp.local/rating/storefront/ratings/products/{productId}, .../rating/storefront/ratings/product/{productId}/average-star, .../rating/backoffice/ratings | lists and averages public; posting/deleting own reviews needs CUSTOMER; `backoffice` ADMIN |
 | Promotion API | http://api.shopapp.local/promotion/backoffice/promotions, .../promotion/storefront/promotions/verify | `backoffice` ADMIN; `storefront` any logged-in user (order calls it with the customer's token) |
 | Back office: reviews, promotions | http://backoffice.shopapp.local/reviews, /promotion/manager-promotion | `admin` / `admin` |

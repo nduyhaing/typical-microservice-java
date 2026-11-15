@@ -36,14 +36,14 @@ describe('product page', () => {
   it('navigating to another product resets the gallery pick and the quantity', async () => {
     const first = product(1, 'Phone', ['http://m/1a.png', 'http://m/1b.png']);
     const second = product(2, 'Tablet', ['http://m/2a.png', 'http://m/2b.png']);
-    const { rerender } = render(<ProductPage product={first} options={[]} variations={[]} reviews={null} />);
+    const { rerender } = render(<ProductPage product={first} options={[]} variations={[]} reviews={null} similarProducts={[]} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Show image 2' }));
     expect(screen.getByRole('img', { name: 'Phone' })).toHaveAttribute('src', 'http://m/1b.png');
     await userEvent.clear(screen.getByLabelText('Quantity'));
     await userEvent.type(screen.getByLabelText('Quantity'), '3');
 
-    rerender(<ProductPage product={second} options={[]} variations={[]} reviews={null} />);
+    rerender(<ProductPage product={second} options={[]} variations={[]} reviews={null} similarProducts={[]} />);
 
     expect(screen.getByRole('img', { name: 'Tablet' })).toHaveAttribute('src', 'http://m/2a.png');
     expect(screen.getByLabelText('Quantity')).toHaveValue(1);

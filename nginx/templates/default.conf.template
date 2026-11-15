@@ -150,6 +150,19 @@ server {
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
+    # similar products (public) and its reindex (ADMIN); nginx does not wait for it: the product page hides the
+    # section when it is down (decisions.md 5-45)
+    location /recommendation/ {
+        set $upstream_recommendation recommendation:8080;
+        proxy_pass http://$upstream_recommendation;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
     # Promotion's coupon usage endpoints: only the order service calls them, inside the compose network
     # (http://promotion:8080); through the gateway any customer could burn or give back coupon uses (4-75).
     location ~* ^/promotion/+storefront/+promotions/+(apply|release)-usage {
