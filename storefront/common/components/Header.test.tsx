@@ -20,6 +20,15 @@ describe('Header', () => {
     expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
   });
 
+  it('has the product search box', async () => {
+    vi.mocked(authService.getAuthentication).mockResolvedValue({ isAuthenticated: false, authenticatedUser: null });
+
+    render(<Layout>page</Layout>);
+
+    expect(screen.getByRole('search')).toContainElement(screen.getByRole('combobox', { name: 'Search products' }));
+    await screen.findByRole('link', { name: 'Log in' });
+  });
+
   it('shows username, profile, cart and Log out when logged in', async () => {
     vi.mocked(authService.getAuthentication).mockResolvedValue({
       isAuthenticated: true,

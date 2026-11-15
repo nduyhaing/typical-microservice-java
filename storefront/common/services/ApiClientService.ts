@@ -31,9 +31,12 @@ function parseBody(text: string): unknown {
   }
 }
 
-async function request<T>(method: string, path: string, payload?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, payload?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const init: RequestInit = { method, headers };
+  if (signal) {
+    init.signal = signal;
+  }
   if (payload !== undefined) {
     headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(payload);
@@ -46,7 +49,8 @@ async function request<T>(method: string, path: string, payload?: unknown): Prom
   return body as T;
 }
 
-export const get = <T>(path: string) => request<T>('GET', path);
+/** `signal` aborts the request (e.g. a superseded search suggestion). */
+export const get = <T>(path: string, signal?: AbortSignal) => request<T>('GET', path, undefined, signal);
 
 export const post = <T>(path: string, payload: unknown) => request<T>('POST', path, payload);
 

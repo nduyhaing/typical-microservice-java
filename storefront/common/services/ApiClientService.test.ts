@@ -33,6 +33,16 @@ describe('get', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/product/storefront/product/galaxy-s24', expect.objectContaining({ method: 'GET' }));
   });
 
+  it('passes an abort signal to fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await get('/search/storefront/search_suggest?keyword=ga', controller.signal);
+
+    expect(fetchMock.mock.calls[0][1].signal).toBe(controller.signal);
+  });
+
   it('rejects non-2xx responses with ApiError carrying status and body', async () => {
     vi.stubGlobal(
       'fetch',

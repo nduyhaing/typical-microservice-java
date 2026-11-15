@@ -7,6 +7,7 @@ import Nav from 'react-bootstrap/Nav';
 import Navbar from 'react-bootstrap/Navbar';
 import { LOGIN_URL, LOGOUT_URL } from '../../modules/auth/services/AuthenticationService';
 import { getCartItemCount } from '../../modules/cart/services/CartService';
+import SearchBox from '../../modules/search/components/SearchBox';
 import { useAuth } from '../hooks/useAuth';
 import { useFetch } from '../hooks/useFetch';
 
@@ -74,6 +75,7 @@ export default function Layout({ title, children }: Props) {
               Products
             </Nav.Link>
           </Nav>
+          <SearchBox />
           <AccountMenu />
         </Container>
       </Navbar>
