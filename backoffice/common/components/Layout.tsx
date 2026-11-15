@@ -13,7 +13,7 @@ type Props = { title?: string; children: ReactNode };
 
 export type NavLink = { href: string; label: string; description: string };
 
-/** Navigation grouped like YAS's sidebar (Catalog, Location, Tax, Inventory); the dashboard lists the same pages. */
+/** Navigation grouped like YAS's sidebar (Catalog, Location, Tax, Inventory, Promotion); the dashboard lists the same pages. */
 export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
   {
     label: 'Catalog',
@@ -54,6 +54,16 @@ export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
         href: '/inventory/warehouse-products',
         label: 'Warehouse products',
         description: 'Add stock-tracked products to a warehouse.',
+      },
+    ],
+  },
+  {
+    label: 'Promotion',
+    links: [
+      {
+        href: '/promotion/manager-promotion',
+        label: 'Promotions',
+        description: 'Coupon codes: percentage or fixed discounts for products, brands or categories.',
       },
     ],
   },

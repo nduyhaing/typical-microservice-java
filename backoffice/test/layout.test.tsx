@@ -35,6 +35,7 @@ describe('Back office layout and dashboard', () => {
           ['Warehouse products', '/inventory/warehouse-products'],
         ],
       ],
+      ['Promotion', [['Promotions', '/promotion/manager-promotion']]],
     ];
     for (const [group, links] of groups) {
       // the dashboard lists every page under its group heading
