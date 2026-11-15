@@ -180,6 +180,8 @@ services:
       # admin API straight to Keycloak on the compose network
       KEYCLOAK_ADMIN_URL: http://identity:8080
       CUSTOMER_MANAGEMENT_CLIENT_SECRET: ${CUSTOMER_MANAGEMENT_CLIENT_SECRET}
+      # saved addresses: straight to the location container, with the customer's token (decisions.md 3c-33)
+      SHOPAPP_SERVICES_LOCATION: http://location:8080/location
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /customer/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
       interval: 10s

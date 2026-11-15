@@ -45,6 +45,9 @@ function AccountMenu() {
       <Nav.Link as={Link} href="/profile">
         Profile
       </Nav.Link>
+      <Nav.Link as={Link} href="/address">
+        Addresses
+      </Nav.Link>
       <form action={LOGOUT_URL} method="post" className="d-inline">
         <Button type="submit" variant="outline-light" size="sm">
           Log out

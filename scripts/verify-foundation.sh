@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for shop_app: checks the definition of done of slice 1 (foundation) and slice 2 (2a browse,
-# 2b login + cart, 2c checkout + orders) against a running stack.
+# 2b login + cart, 2c checkout + orders) and later slices against a running stack.
 #   bash scripts/verify-foundation.sh            # checks the running stack
 #   bash scripts/verify-foundation.sh --restart  # also does `docker compose down && up` and re-checks
 # Needs: docker, curl, python (for JSON). Run from anywhere; works in Git Bash on Windows.
@@ -205,6 +205,25 @@ check_checkout_and_order() {
     fi
 }
 
+# Slice 3c: address book through the BFF (customer saves the link, location the address, caller's token relayed).
+check_address_book() {
+    local country_id address_id status
+    country_id=$(curl -s "$(url storefront /api/location/storefront/countries)"         | python -c "import json,sys;print(next(c['id'] for c in json.load(sys.stdin) if c['code2']=='VN'))" || true)
+    address_id=$(curl -s -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"contactName\":\"Smoke Address\",\"phone\":\"0123456789\",\"addressLine1\":\"1 Smoke St\",\"countryId\":${country_id:-0}}"         "$(url storefront /api/customer/storefront/user-address)"         | python -c "import json,sys;print(json.load(sys.stdin)['addressGetVm']['id'])" 2>/dev/null || true)
+    if [ -z "$address_id" ]; then
+        fail "save an address in the address book"
+        return
+    fi
+    pass "save an address in the address book"
+    if curl -s -b "$COOKIE_JAR" "$(url storefront /api/customer/storefront/user-address)" | grep -q "\"id\":$address_id,"; then
+        pass "address book lists address #$address_id"
+    else
+        fail "address book lists address #$address_id"
+    fi
+    status=$(curl -s -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" -X DELETE         "$(url storefront "/api/customer/storefront/user-address/$address_id")" || true)
+    if [ "$status" = "200" ]; then pass "delete the saved address"; else fail "delete the saved address -> $status"; fi
+}
+
 check_login_and_cart() {
     local base product_id violet_id
     base=$(url storefront "")
@@ -231,6 +250,7 @@ check_login_and_cart() {
         fail "add Galaxy S24 Violet to the cart and read it back"
     fi
     check_checkout_and_order "$violet_id"
+    check_address_book
     curl -s -o /dev/null -b "$COOKIE_JAR" -X DELETE "$(url storefront "/api/cart/storefront/cart/items/$violet_id")" || true
     curl -s -o /dev/null -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" -X POST "$(url storefront /logout)" || true
     if curl -s -b "$COOKIE_JAR" "$(url storefront /authentication)" | grep -q '"isAuthenticated":false'; then
