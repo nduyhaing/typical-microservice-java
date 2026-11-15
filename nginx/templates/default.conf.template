@@ -180,6 +180,8 @@ server {
 server {
     listen ${NGINX_HTTP_PORT};
     server_name backoffice.${DOMAIN};
+    # back-office image uploads go through this host (3b-15); same limit as the api host.
+    client_max_body_size 10m;
 
     location / {
         set $upstream_backoffice_bff backoffice-bff:8088;
