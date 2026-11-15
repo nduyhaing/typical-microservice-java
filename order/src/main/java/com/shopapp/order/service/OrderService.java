@@ -21,15 +21,19 @@ import com.shopapp.order.utils.Constants;
 import com.shopapp.order.viewmodel.external.CartItemDeleteVm;
 import com.shopapp.order.viewmodel.external.ProductQuantityVm;
 import com.shopapp.order.viewmodel.order.OrderAddressPostVm;
+import com.shopapp.order.viewmodel.order.OrderExistsByProductAndUserGetVm;
 import com.shopapp.order.viewmodel.order.OrderPostVm;
 import com.shopapp.order.viewmodel.order.OrderPreviewPostVm;
 import com.shopapp.order.viewmodel.order.OrderPreviewVm;
 import com.shopapp.order.viewmodel.order.OrderVm;
 import java.math.BigDecimal;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -216,6 +220,28 @@ public class OrderService {
             .stateOrProvinceId(address.getStateOrProvinceId()).stateOrProvinceName(address.getStateOrProvinceName())
             .countryId(address.getCountryId()).countryName(address.getCountryName())
             .build();
+    }
+
+    /**
+     * Statuses in which a customer counts as having bought the order's products (decisions.md 4-30). YAS: COMPLETED
+     * only; shop_app orders stay PENDING_PAYMENT until payment exists (slice 5), so every placed order counts except a
+     * cancelled, rejected or refunded one. Slice 5 tightens this to paid/completed.
+     */
+    static final Set<OrderStatus> BOUGHT_STATUSES = EnumSet.complementOf(
+        EnumSet.of(OrderStatus.CANCELLED, OrderStatus.REJECT, OrderStatus.REFUND));
+
+    /**
+     * YAS isOrderCompletedWithUserIdAndProductId: whether the caller has an order with the product or one of its
+     * variations (YAS checks only the variations when there are some; the product's own id is kept as well).
+     */
+    @Transactional(readOnly = true)
+    public OrderExistsByProductAndUserGetVm hasBoughtProduct(Long productId) {
+        String customerId = AuthenticationUtils.extractUserId();
+        Set<Long> productIds = new LinkedHashSet<>();
+        productIds.add(productId);
+        productIds.addAll(productService.getVariationIds(productId));
+        return new OrderExistsByProductAndUserGetVm(
+            orderRepository.existsBoughtProduct(customerId, productIds, BOUGHT_STATUSES));
     }
 
     @Transactional(readOnly = true)

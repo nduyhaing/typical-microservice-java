@@ -1,6 +1,7 @@
 package com.shopapp.order.controller;
 
 import com.shopapp.order.service.OrderService;
+import com.shopapp.order.viewmodel.order.OrderExistsByProductAndUserGetVm;
 import com.shopapp.order.viewmodel.order.OrderPostVm;
 import com.shopapp.order.viewmodel.order.OrderPreviewPostVm;
 import com.shopapp.order.viewmodel.order.OrderPreviewVm;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -30,6 +32,13 @@ public class OrderController {
     @PostMapping("/storefront/orders/preview")
     public ResponseEntity<OrderPreviewVm> previewOrder(@Valid @RequestBody OrderPreviewPostVm previewPostVm) {
         return ResponseEntity.ok(orderService.previewOrder(previewPostVm));
+    }
+
+    /** YAS: did the caller buy the product (or a variation of it)? The rating service asks before a review (4-30). */
+    @GetMapping("/storefront/orders/completed")
+    public ResponseEntity<OrderExistsByProductAndUserGetVm> checkOrderExistsByProductIdAndUserIdWithStatus(
+        @RequestParam Long productId) {
+        return ResponseEntity.ok(orderService.hasBoughtProduct(productId));
     }
 
     @GetMapping("/storefront/orders/my-orders")

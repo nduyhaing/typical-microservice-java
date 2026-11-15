@@ -67,6 +67,7 @@ abstract class OrderItSupport {
     static final List<Call> RESTORE_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> TAX_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> ADDRESS_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> VARIATION_CALLS = new CopyOnWriteArrayList<>();
     static final HttpServer BACKENDS = backends();
 
     /** Orderable products: id -> JSON (25 and 28 in tax class 1, 26 in class 2 without a rate, 27 without class). */
@@ -118,6 +119,21 @@ abstract class OrderItSupport {
                 respond(exchange, PRODUCT_DOWN.get() ? 503 : 200,
                     "{\"productCheckoutListVms\":[" + items + "],\"pageNo\":0,\"pageSize\":100,\"totalElements\":0,"
                         + "\"totalPages\":1,\"isLast\":true}");
+            });
+            // product 40 is a parent whose variations are 25 and 28; 404 is unknown; any other id has none
+            server.createContext("/product/storefront/product-variations/", exchange -> {
+                VARIATION_CALLS.add(record(exchange));
+                String id = exchange.getRequestURI().getPath()
+                    .substring("/product/storefront/product-variations/".length());
+                if (PRODUCT_DOWN.get()) {
+                    respond(exchange, 503, "");
+                } else if (id.equals("404")) {
+                    respond(exchange, 404, "{\"statusCode\":\"404 NOT_FOUND\",\"title\":\"Not Found\","
+                        + "\"detail\":\"Product 404 is not found\",\"fieldErrors\":[]}");
+                } else {
+                    respond(exchange, 200, id.equals("40")
+                        ? "[{\"id\":25,\"name\":\"Violet\"},{\"id\":28,\"name\":\"Sticker\"}]" : "[]");
+                }
             });
             server.createContext("/product/backoffice/products/subtract-quantity", exchange -> {
                 SUBTRACT_CALLS.add(record(exchange));
@@ -235,6 +251,7 @@ abstract class OrderItSupport {
         RESTORE_CALLS.clear();
         TAX_CALLS.clear();
         ADDRESS_CALLS.clear();
+        VARIATION_CALLS.clear();
         jdbc.execute("TRUNCATE order_item, \"order\", order_address, checkout_item, checkout RESTART IDENTITY CASCADE");
     }
 

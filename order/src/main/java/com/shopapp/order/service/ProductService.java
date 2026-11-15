@@ -8,6 +8,7 @@ import com.shopapp.order.utils.Constants;
 import com.shopapp.order.viewmodel.external.ProductCheckoutListVm;
 import com.shopapp.order.viewmodel.external.ProductGetCheckoutListVm;
 import com.shopapp.order.viewmodel.external.ProductQuantityVm;
+import com.shopapp.order.viewmodel.external.ProductVariationIdVm;
 import com.shopapp.order.viewmodel.external.RemoteErrorVm;
 import java.util.Collection;
 import java.util.List;
@@ -15,6 +16,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
@@ -29,6 +31,9 @@ import org.springframework.web.client.RestClientException;
 @Slf4j
 @Service
 public class ProductService {
+
+    private static final ParameterizedTypeReference<List<ProductVariationIdVm>> VARIATIONS =
+        new ParameterizedTypeReference<>() { };
 
     private final RestClient restClient;
 
@@ -86,6 +91,30 @@ public class ProductService {
             throw new InternalServerErrorException("Product service is unavailable, please try again later");
         } catch (RestClientException ex) {
             log.error("Product service unavailable while taking stock: {}", ex.getMessage());
+            throw new InternalServerErrorException("Product service is unavailable, please try again later");
+        }
+    }
+
+    /**
+     * The ids of the product's published variations (YAS order asks product the same way), with the caller's token;
+     * empty when it has none or product does not know it (404). Product down is a 500.
+     */
+    public List<Long> getVariationIds(Long productId) {
+        try {
+            List<ProductVariationIdVm> variations = restClient.get()
+                .uri("/storefront/product-variations/{id}", productId)
+                .headers(headers -> headers.setBearerAuth(AuthenticationUtils.extractJwt()))
+                .retrieve()
+                .body(VARIATIONS);
+            return variations == null ? List.of() : variations.stream().map(ProductVariationIdVm::id).toList();
+        } catch (HttpClientErrorException ex) {
+            if (ex.getStatusCode().isSameCodeAs(HttpStatus.NOT_FOUND)) {
+                return List.of();
+            }
+            log.error("Product refused the variation lookup of {}: {}", productId, ex.getMessage());
+            throw new InternalServerErrorException("Product service is unavailable, please try again later");
+        } catch (RestClientException ex) {
+            log.error("Product service unavailable: {}", ex.getMessage());
             throw new InternalServerErrorException("Product service is unavailable, please try again later");
         }
     }
