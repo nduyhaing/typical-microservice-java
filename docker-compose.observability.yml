@@ -71,7 +71,7 @@ services:
       - shopapp-network
 
   tempo:
-    image: grafana/tempo:2.10.10
+    image: grafana/tempo:3.1.1
     command: ["-config.file=/etc/tempo/tempo.yaml"]
     mem_limit: 384m
     volumes:
