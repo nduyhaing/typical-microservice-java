@@ -16,11 +16,16 @@ import com.shopapp.product.viewmodel.product.ProductCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
+import com.shopapp.product.viewmodel.product.ProductPromotionTargetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
 import com.shopapp.product.viewmodel.product.ProductsGetVm;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +46,9 @@ public class ProductService {
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductRelatedRepository productRelatedRepository;
     private final MediaUrlResolver mediaUrlResolver;
+
+    /** The most ids {@link #getPromotionTargets} takes (the controller refuses more). */
+    public static final int MAX_PROMOTION_TARGETS = 100;
 
     public ProductFeatureGetVm getListFeaturedProducts(int pageNo, int pageSize) {
         return mediaUrlResolver.readThenResolve(() -> {
@@ -108,6 +116,38 @@ public class ProductService {
         return new ProductGetCheckoutListVm(
             page.map(product -> ProductCheckoutListVm.fromModel(product, "")).getContent(),
             page.getNumber(), page.getSize(), (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
+    }
+
+    /**
+     * The orderable products among {@code productIds} (same rule as {@link #getProductCheckoutList}) with what decides
+     * a coupon's products: parent, brand (a variation without one takes its parent's) and categories (own plus the
+     * parent's), in two queries (decisions.md 4-74).
+     */
+    @Transactional(readOnly = true)
+    public List<ProductPromotionTargetVm> getPromotionTargets(List<Long> productIds) {
+        List<Product> products = productRepository.findOrderableByIds(productIds.stream().distinct().toList(),
+            PageRequest.of(0, MAX_PROMOTION_TARGETS)).getContent();
+        Set<Long> lookedUp = new HashSet<>();
+        products.forEach(product -> {
+            lookedUp.add(product.getId());
+            if (product.getParent() != null) {
+                lookedUp.add(product.getParent().getId());
+            }
+        });
+        Map<Long, List<Long>> categoriesByProduct = lookedUp.isEmpty() ? Map.of()
+            : productCategoryRepository.findCategoryLinks(lookedUp).stream().collect(Collectors.groupingBy(
+                ProductCategoryRepository.CategoryLink::getProductId,
+                Collectors.mapping(ProductCategoryRepository.CategoryLink::getCategoryId, Collectors.toList())));
+        return products.stream().map(product -> {
+            Product parent = product.getParent();
+            Brand brand = product.getBrand() != null || parent == null ? product.getBrand() : parent.getBrand();
+            Set<Long> categoryIds = new LinkedHashSet<>(categoriesByProduct.getOrDefault(product.getId(), List.of()));
+            if (parent != null) {
+                categoryIds.addAll(categoriesByProduct.getOrDefault(parent.getId(), List.of()));
+            }
+            return new ProductPromotionTargetVm(product.getId(), parent == null ? null : parent.getId(),
+                brand == null ? null : brand.getId(), List.copyOf(categoryIds), product.getPrice());
+        }).toList();
     }
 
     public ProductsGetVm getRelatedProductsStorefront(Long id, int pageNo, int pageSize) {

@@ -36,6 +36,7 @@ import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
 import com.shopapp.product.viewmodel.product.ProductVariationPutVm;
 import com.shopapp.product.viewmodel.product.ProductVariationSaveVm;
 import com.shopapp.product.viewmodel.productoption.ProductOptionValuePostVm;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -227,6 +228,10 @@ public class ProductAdminService {
             // every variation removed: the product is sold on its own again
             product.setHasOptions(false);
         }
+        // Categories (and images, related products) live in other tables: an edit of only those leaves the product
+        // row clean, so Hibernate would not update it and Debezium (which captures the product row) would emit
+        // nothing; search would keep the old categories. Touching the row always produces the CDC update (4-73).
+        product.setLastModifiedOn(ZonedDateTime.now());
         productRepository.save(product);
     }
 

@@ -39,8 +39,8 @@ public record PromotionPostVm(
     @NotNull Instant endDate,
     @NotNull ApplyTo applyTo,
     @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> productIds,
-    @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> brandIds,
-    @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> categoryIds
+    @Size(max = Constants.MAX_GROUP_TARGETS) List<@NotNull @Positive Long> brandIds,
+    @Size(max = Constants.MAX_GROUP_TARGETS) List<@NotNull @Positive Long> categoryIds
 ) implements PromotionInput {
 
     static final String SLUG = "^[a-z0-9]+(-[a-z0-9]+)*$";

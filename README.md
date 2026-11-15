@@ -125,7 +125,9 @@ publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.p
   offsets and status in the Kafka topics `connect-configs`, `connect-offsets`, `connect-statuses`);
   `debezium-db-init` (one-shot: replication user, grants and publication, after product's tables exist);
   `kafka-connect-init` (registers `kafka/connects/debezium-product.json` as `product-connector` with
-  `PUT /connectors/product-connector/config` on every `up`, then restarts a FAILED connector every 30 s).
+  `PUT /connectors/product-connector/config` on every `up`, then restarts a FAILED connector every 30 s and
+  registers a deleted one again — to delete or stop a connector on purpose, `docker compose stop kafka-connect-init`
+  first).
 - **Messages**: key `{"id":<product id>}`, value the Debezium envelope without schema:
   `{"before":…,"after":{…product columns…},"op":"c|u|d|r","source":…}`. `r` = initial snapshot (all products, once,
   when the connector first starts), a delete is followed by a tombstone (null value). Every product row update
@@ -134,8 +136,9 @@ publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.p
   restart) and *Topics* → `dbproduct.public.product` → *Messages*. From the shell:
   `docker compose exec kafka-connect curl -s localhost:8083/connectors?expand=status`. The smoke script renames a
   product and waits for its message on the topic.
-- **Postgres user**: Debezium logs in as `DEBEZIUM_DB_USER` (`.env`, default `debezium`) with `REPLICATION` and
-  `SELECT` on `public.product` only, not the superuser. After changing `DEBEZIUM_DB_PASSWORD`, run
+- **Postgres user**: Debezium logs in as `DEBEZIUM_DB_USER` (`.env`, default `debezium`) with `REPLICATION`,
+  `CONNECT` on the product database and `SELECT` on `public.product` only, not the superuser (no login may connect
+  to a database it was not granted). After changing `DEBEZIUM_DB_PASSWORD`, run
   `bash scripts/apply-debezium-user.sh` and `docker compose restart kafka-connect`.
 - **Disk safety**: a replication slot keeps WAL until Debezium confirms it. If `kafka-connect` is stopped for a long
   time while the other databases keep writing, WAL piles up; `max_slot_wal_keep_size = 1GB`
@@ -170,16 +173,17 @@ dbproduct.public.product --consumer group "search"--> search --GET /storefront/p
   `aggregations.brands|categories|attributes` facet counts) and `GET /storefront/search_suggest?keyword=` (up to 10
   names). Only published, individually visible products are ever returned. Back office:
   `POST /backoffice/reindex` (ADMIN) re-reads every product.
-- **How the index is filled**: on every product event (`c`, `r`, `u`) search reads the product again from product
-  and indexes it; product answers 404 for unpublished or hidden products and search removes them; a delete (`d` or
+- **How the index is filled**: an event whose row is unpublished or not visible individually removes the document
+  at once, without asking product (so an unpublish works while product is down); on every other product event
+  (`c`, `r`, `u`) search reads the product again from product and indexes it (a 404 removes it); a delete (`d` or
   the tombstone) removes the document. The consumer group starts from the earliest offset, so a new, empty index is
   filled from Debezium's initial snapshot (`op=r` for every product) already on the topic. Updates that only change
   the stock are not re-read when Debezium sends both row images (by default it does not, so they are re-read —
   harmless). Duplicates and out-of-order events are safe: each event re-reads the current product, and the document
   version is product's last-modified time, so an older read never overwrites a newer one.
-- **Failures**: product or Elasticsearch unavailable → the event is retried on retry topics (2 s, 10 s, 50 s), then
-  parked on `dbproduct.public.product-dlt` (Kafka UI → Topics). A malformed message goes to the DLT at once and
-  does not block the next one. After an outage, or after renaming a **brand or category** (those changes do not
+- **Failures**: product or Elasticsearch unavailable → the event is retried in place (1 s doubling to 2 min) until
+  they answer, however long the outage: search falls behind but loses nothing. A malformed message goes to
+  `dbproduct.public.product-dlt` (Kafka UI → Topics) at once; any other error after 2 retries. After an outage, or after renaming a **brand or category** (those changes do not
   produce product events, so search keeps the old name until each product changes), rebuild with
   `curl -X POST -H "Authorization: Bearer $TOKEN" http://api.shopapp.local/search/backoffice/reindex`
   (admin token, see "URLs and credentials").
@@ -191,20 +195,16 @@ dbproduct.public.product --consumer group "search"--> search --GET /storefront/p
 - **Resources**: Elasticsearch about 0.8–1 GB RAM, 30–60 s to become healthy; `search` ~300–400 MB. If either is
   down, the rest of the shop keeps working (nginx does not wait for search; the storefront search page shows an
   error) and the smoke script reports it; on restart the consumer continues from its committed offset.
-- **Index empty although products exist?** The consumer group `search` only starts from the earliest offset when
-  it has no committed offset yet. Either `POST /backoffice/reindex`, or replay the topic:
+- **Index empty although products exist?** The CDC topic is compacted (it keeps the latest message of every
+  product), and search re-reads it from the start when it starts with an empty index — `docker compose restart
+  search` refills it. Otherwise `POST /backoffice/reindex`, or replay the topic by hand:
   `docker compose stop search`, then
   `MSYS_NO_PATHCONV=1 docker compose exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group search --topic dbproduct.public.product --reset-offsets --to-earliest --execute`,
-  then `docker compose start search` (Kafka keeps the topic 7 days by default, so old snapshots may be gone).
+  then `docker compose start search`.
 - **Start from scratch**: `docker compose stop search`, delete the index
   (`docker compose exec elasticsearch curl -s -X DELETE -u "elastic:$ELASTIC_PASSWORD" localhost:9200/product`),
   `docker compose start search`, then `POST /backoffice/reindex` (the topic may no longer hold every product).
 
-## URLs and credentials
-
-**Local development only — never reuse these anywhere else.**
-
-| What | URL | Credentials |
 ## Reviews
 
 Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).

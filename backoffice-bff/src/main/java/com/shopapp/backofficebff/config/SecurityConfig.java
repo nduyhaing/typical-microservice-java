@@ -40,6 +40,11 @@ public class SecurityConfig {
         "/api/product/backoffice/products/subtract-quantity/**",
         "/api/product/backoffice/products/restore-quantity/**"};
 
+    /** Promotion's coupon usage: only order calls it, inside the network (slice 4 review I-3, decisions.md 4-75). */
+    private static final String[] COUPON_USAGE = {
+        "/api/promotion/storefront/promotions/apply-usage/**",
+        "/api/promotion/storefront/promotions/release-usage/**"};
+
     private static final String REALM_ACCESS_CLAIM = "realm_access";
     private static final String ROLES_CLAIM = "roles";
     private static final String LOGIN_PATH = "/oauth2/authorization/keycloak";
@@ -56,6 +61,7 @@ public class SecurityConfig {
             .authorizeExchange(auth -> auth
                 // product's order-only stock endpoints are for the order service inside the network (3c-63)
                 .pathMatchers(STOCK_WRITES).denyAll()
+                .pathMatchers(COUPON_USAGE).denyAll()
                 .pathMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .anyExchange().hasRole("ADMIN"))
             .oauth2Login(Customizer.withDefaults())

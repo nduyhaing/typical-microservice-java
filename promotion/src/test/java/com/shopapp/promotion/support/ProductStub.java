@@ -19,9 +19,9 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 /**
- * Fake product service ({@code /product}) on a JDK HttpServer with the endpoints promotion calls:
- * {@code GET /products?ids=} (orderable products), {@code /storefront/brands}, {@code /storefront/brand/{slug}/products},
- * {@code /storefront/categories}, {@code /storefront/category/{slug}/products} (paged). {@link #down()} answers 503.
+ * Fake product service ({@code /product}) on a JDK HttpServer with the endpoint promotion calls,
+ * {@code GET /storefront/products/promotion-targets?ids=} (decisions.md 4-74), plus the older list endpoints (to show
+ * they are no longer called). {@link #down()} answers 503.
  * Every request is recorded as {@code "GET uri | Authorization"}.
  */
 public final class ProductStub implements AutoCloseable {
@@ -76,6 +76,10 @@ public final class ProductStub implements AutoCloseable {
         down = false;
     }
 
+    public void resetRequests() {
+        requests.clear();
+    }
+
     public List<String> requests() {
         return List.copyOf(requests);
     }
@@ -90,7 +94,13 @@ public final class ProductStub implements AutoCloseable {
             }
             String path = exchange.getRequestURI().getPath().substring("/product".length());
             Map<String, String> query = query(exchange);
-            if (path.equals("/products")) {
+            if (path.equals("/storefront/products/promotion-targets")) {
+                Set<Long> ids = Arrays.stream(query.get("ids").split(",")).map(Long::parseLong)
+                    .collect(Collectors.toSet());
+                String items = products.values().stream().filter(p -> ids.contains(p.id()))
+                    .map(this::targetJson).collect(Collectors.joining(","));
+                send(exchange, 200, "[" + items + "]");
+            } else if (path.equals("/products")) {
                 if (exchange.getRequestHeaders().getFirst("Authorization") == null) {
                     send(exchange, 401, "{}");
                     return;
@@ -131,6 +141,19 @@ public final class ProductStub implements AutoCloseable {
                 send(exchange, 404, "{}");
             }
         }
+    }
+
+    /** Like product: a variation's brand falls back to its parent's, its categories include its parent's. */
+    private String targetJson(Product product) {
+        Product parent = product.parentId() == null ? null : products.get(product.parentId());
+        Long brandId = product.brandId() != null || parent == null ? product.brandId() : parent.brandId();
+        Set<Long> categoryIds = new java.util.TreeSet<>(product.categoryIds());
+        if (parent != null) {
+            categoryIds.addAll(parent.categoryIds());
+        }
+        return "{\"id\":" + product.id() + ",\"parentId\":" + product.parentId() + ",\"brandId\":" + brandId
+            + ",\"categoryIds\":" + categoryIds.stream().map(String::valueOf).collect(Collectors.joining(",", "[", "]"))
+            + ",\"price\":" + product.price() + "}";
     }
 
     private static String slugList(Map<Long, String> items) {

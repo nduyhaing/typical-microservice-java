@@ -2,12 +2,15 @@ package com.shopapp.promotion.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.shopapp.promotion.support.AbstractPromotionIT;
+import java.util.stream.Collectors;
+import java.util.stream.LongStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -63,8 +66,9 @@ class PromotionVerifyIT extends AbstractPromotionIT {
             .andExpect(jsonPath("$.productIds", contains(6, 1)))
             .andExpect(jsonPath("$.productId").value(1))
             .andExpect(jsonPath("$.promotionName").value("Promo SAVE10"));
-        assertThat(PRODUCT.requests()).anyMatch(r -> r.startsWith("GET /product/products?ids=6,4,1")
-            && r.endsWith("| Bearer " + CUSTOMER_TOKEN));
+        // one product call per verify, whatever the promotion targets (decisions.md 4-74)
+        assertThat(PRODUCT.requests()).singleElement().satisfies(r ->
+            assertThat(r).startsWith("GET /product/storefront/products/promotion-targets?ids=6,4,1 "));
     }
 
     @Test
@@ -133,15 +137,16 @@ class PromotionVerifyIT extends AbstractPromotionIT {
     }
 
     @Test
-    void brandPromotionDoesNotListBrandProductsWhenEveryProductHasABrand() throws Exception {
-        brandPromotion("APPLE5", APPLE);
-        verify("APPLE5", "1000", "1,4").andExpect(status().isOk())
-            .andExpect(jsonPath("$.productIds", contains(1)));
-        assertThat(PRODUCT.requests()).noneMatch(r -> r.contains("/storefront/"));
+    void brandPromotion_variationWithoutBrandCountsThroughItsParent_inOneProductCall() throws Exception {
+        brandPromotion("SAMSUNG5", SAMSUNG);
+        PRODUCT.resetRequests();
+        verify("SAMSUNG5", "1000", "1,24").andExpect(status().isOk())
+            .andExpect(jsonPath("$.productIds", contains(24)));
+        assertThat(PRODUCT.requests()).hasSize(1);
     }
 
     @Test
-    void categoryPromotionAppliesToProductsInTheCategoryAcrossPages() throws Exception {
+    void categoryPromotion_matchesTheProductOrItsParent_inOneProductCall() throws Exception {
         for (long id = 100; id < 250; id++) {
             PRODUCT.product(id, null, APPLE, 10.0, LAPTOPS);
         }
@@ -149,12 +154,33 @@ class PromotionVerifyIT extends AbstractPromotionIT {
             .replace("\"categoryIds\":[]", "\"categoryIds\":[" + LAPTOPS + "]"));
         createPromotion(promotionJson("PHONES").replace("\"applyTo\":\"PRODUCT\"", "\"applyTo\":\"CATEGORY\"")
             .replace("\"categoryIds\":[]", "\"categoryIds\":[" + PHONES + "]"));
+        PRODUCT.resetRequests();
 
         verify("LAPTOPS", "2000", "1,6,249").andExpect(status().isOk())
             .andExpect(jsonPath("$.productIds", contains(6, 249)));
+        assertThat(PRODUCT.requests()).hasSize(1);
         verify("PHONES", "2000", "6,24").andExpect(status().isOk())
             .andExpect(jsonPath("$.productIds", contains(24)));
         expectCode(verify("PHONES", "2000", "6"), "PROMOTION_NOT_APPLICABLE");
+        assertThat(PRODUCT.requests()).hasSize(3);
+    }
+
+    @Test
+    void tooManyTargets_areRefused() throws Exception {
+        String brands = LongStream.rangeClosed(1, 51).mapToObj(String::valueOf).collect(Collectors.joining(","));
+        mockMvc.perform(post("/backoffice/promotions").with(admin()).contentType(MediaType.APPLICATION_JSON)
+                .content(promotionJson("MANY").replace("\"applyTo\":\"PRODUCT\"", "\"applyTo\":\"BRAND\"")
+                    .replace("\"brandIds\":[]", "\"brandIds\":[" + brands + "]")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.fieldErrors[0]").value(containsString("brandIds")));
+    }
+
+    @Test
+    void verifyIsForCustomers_adminTokenIsForbidden() throws Exception {
+        createPromotion(promotionJson("ADMINS"));
+        mockMvc.perform(post("/storefront/promotions/verify").with(admin()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"couponCode\":\"ADMINS\",\"orderPrice\":10,\"productIds\":[1]}"))
+            .andExpect(status().isForbidden());
     }
 
     @Test

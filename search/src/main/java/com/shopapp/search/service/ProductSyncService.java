@@ -38,11 +38,15 @@ public class ProductSyncService {
     /**
      * Re-reads the product and indexes it, or removes it when product says 404 (deleted, unpublished, hidden) or
      * it is not published and visible individually. Product unavailable → {@link ProductUnavailableException}.
+     *
+     * @param eventVersion the version of the row image that triggered the read (CDC after image, µs) or null (reindex):
+     *                     a 404 removes the document at that version, so a 404 read before a republish cannot remove
+     *                     the republished document indexed meanwhile (decisions.md 4-71); null removes it "now"
      */
-    public Outcome sync(long id) {
+    public Outcome sync(long id, Long eventVersion) {
         Optional<ProductEsDetailVm> detail = productClient.getEsDetail(id);
         if (detail.isEmpty()) {
-            return delete(id);
+            return eventVersion == null ? delete(id) : delete(id, eventVersion);
         }
         ProductEsDetailVm vm = detail.get();
         long version = versionOf(vm);
@@ -84,7 +88,7 @@ public class ProductSyncService {
     }
 
     /** Removes the document unless the indexed version is newer than {@code version}. */
-    Outcome delete(long id, long version) {
+    public Outcome delete(long id, long version) {
         try {
             client.delete(d -> d.index(Product.INDEX).id(String.valueOf(id))
                 .version(version).versionType(VersionType.ExternalGte));

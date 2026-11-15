@@ -24,6 +24,11 @@ spring:
           httpclient:
             connect-timeout: 2000
             response-timeout: 10s
+            # a recreated upstream container gets a new IP: do not keep connections to the old one (4-80)
+            pool:
+              max-idle-time: 30s
+              max-life-time: 5m
+              eviction-interval: 30s
           default-filters:
             - SaveSession
           routes:

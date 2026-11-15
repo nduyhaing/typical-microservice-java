@@ -23,7 +23,8 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
  * Product's order-only stock endpoints (subtract-quantity, restore-quantity) are reachable inside the compose network
- * only: the BFF refuses them, so a signed-in customer cannot take or give back stock (3c review I3).
+ * only: the BFF refuses them, so a signed-in customer cannot take or give back stock (3c review I3). The same for
+ * promotion's coupon apply-usage / release-usage, which only order calls (slice 4 review I-3).
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @AutoConfigureWebTestClient
@@ -35,6 +36,13 @@ class StockEndpointsBlockedTest {
         "/api/product/backoffice/products/restore-quantity?reference=r-1",
         "/api/product/backoffice/products/subtract%2Dquantity?reference=r-1",
         "/api/product/backoffice/products/restore-quantity/");
+
+    /** Promotion's order-only coupon usage endpoints (slice 4 review I-3, decisions.md 4-75). */
+    private static final List<String> COUPON_USAGE = List.of(
+        "/api/promotion/storefront/promotions/apply-usage?reference=" + java.util.UUID.randomUUID(),
+        "/api/promotion/storefront/promotions/release-usage?reference=" + java.util.UUID.randomUUID(),
+        "/api/promotion/storefront/promotions/apply%2Dusage?reference=r-1",
+        "/api/promotion/storefront/promotions/release-usage/");
 
     private static final AtomicReference<String> API_PATH = new AtomicReference<>();
     private static final HttpServer API = api();
@@ -78,6 +86,27 @@ class StockEndpointsBlockedTest {
                 .expectStatus().value(status -> assertThat(status).isNotIn(200, 204));
         }
         assertThat(API_PATH.get()).isNull();
+    }
+
+    @Test
+    void couponUsageEndpoints_areRefused_andTheApiIsNeverCalled() {
+        for (String path : COUPON_USAGE) {
+            client.mutateWith(mockOidcLogin()).post().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"couponCode\":\"SAVE10\"}").exchange()
+                .expectStatus().isForbidden();
+            client.post().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"couponCode\":\"SAVE10\"}").exchange()
+                .expectStatus().value(status -> assertThat(status).isNotIn(200, 204));
+        }
+        assertThat(API_PATH.get()).isNull();
+    }
+
+    @Test
+    void couponVerify_stillGoesThrough() {
+        client.mutateWith(mockOidcLogin()).post().uri("/api/promotion/storefront/promotions/verify")
+            .contentType(MediaType.APPLICATION_JSON).bodyValue("{}").exchange()
+            .expectStatus().isNoContent();
+        assertThat(API_PATH.get()).isEqualTo("/promotion/storefront/promotions/verify");
     }
 
     @Test

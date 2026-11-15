@@ -150,6 +150,13 @@ server {
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
+    # Promotion's coupon usage endpoints: only the order service calls them, inside the compose network
+    # (http://promotion:8080); through the gateway any customer could burn or give back coupon uses (4-75).
+    location ~* ^/promotion/+storefront/+promotions/+(apply|release)-usage {
+        default_type application/json;
+        return 403 '{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}';
+    }
+
     location /promotion/ {
         set $upstream_promotion promotion:8080;
         proxy_pass http://$upstream_promotion;

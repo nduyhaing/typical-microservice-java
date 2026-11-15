@@ -12,13 +12,24 @@ import tools.jackson.databind.node.ObjectNode;
  *
  * @param productId the id from the key
  * @param action    what search does with it
+ * @param version   the row's {@code last_modified_on} (else {@code created_on}) in microseconds from the after image,
+ *                  the document version a removal is written at; null when the image has none (delete, tombstone)
  */
-public record ProductCdcEvent(long productId, Action action) {
+public record ProductCdcEvent(long productId, Action action, Long version) {
+
+    public ProductCdcEvent(long productId, Action action) {
+        this(productId, action, null);
+    }
 
     /** What the event asks for. */
     public enum Action {
-        /** c, r, u: re-read the product and index or remove it. */
+        /** c, r, u of a published, individually visible row: re-read the product and index or remove it. */
         SYNC,
+        /**
+         * c, r, u whose after image is unpublished or not visible individually: remove the document at the row's
+         * version without asking product, so a product outage cannot keep it searchable (decisions.md 4-70).
+         */
+        UNLIST,
         /** d or tombstone: remove the document. */
         DELETE,
         /** An update that only touched columns search does not index (stock, audit fields). */
@@ -47,11 +58,43 @@ public record ProductCdcEvent(long productId, Action action) {
             throw new PoisonMessageException("CDC message for product " + id + " has no op");
         }
         return switch (op.asString()) {
-            case "c", "r" -> new ProductCdcEvent(id, Action.SYNC);
-            case "u" -> new ProductCdcEvent(id, onlyNotIndexedColumnsChanged(payload) ? Action.SKIP : Action.SYNC);
+            case "c", "r" -> rowEvent(id, payload.get("after"), false);
+            case "u" -> rowEvent(id, payload.get("after"), onlyNotIndexedColumnsChanged(payload));
             case "d" -> new ProductCdcEvent(id, Action.DELETE);
             default -> new ProductCdcEvent(id, Action.IGNORE);
         };
+    }
+
+    private static ProductCdcEvent rowEvent(long id, JsonNode after, boolean onlyNotIndexedColumns) {
+        Long version = rowVersion(after);
+        if (after != null && after.isObject()
+            && (isFalse(after, "is_published") || isFalse(after, "is_visible_individually"))) {
+            return new ProductCdcEvent(id, Action.UNLIST, version);
+        }
+        return new ProductCdcEvent(id, onlyNotIndexedColumns ? Action.SKIP : Action.SYNC, version);
+    }
+
+    private static boolean isFalse(JsonNode image, String column) {
+        JsonNode value = image.get(column);
+        return value != null && value.isBoolean() && !value.asBoolean();
+    }
+
+    /**
+     * {@code last_modified_on}, else {@code created_on}: Debezium sends {@code timestamp(6)} as microseconds since
+     * the epoch (time.precision.mode adaptive, MicroTimestamp). Product writes them in UTC, as its products-es read
+     * returns them, so the value equals the version a product read of the same row gets (4-13).
+     */
+    private static Long rowVersion(JsonNode after) {
+        if (after == null || !after.isObject()) {
+            return null;
+        }
+        for (String column : new String[] {"last_modified_on", "created_on"}) {
+            JsonNode value = after.get(column);
+            if (value != null && value.isIntegralNumber() && value.canConvertToLong()) {
+                return value.asLong();
+            }
+        }
+        return null;
     }
 
     private static long parseId(ObjectMapper mapper, String key) {

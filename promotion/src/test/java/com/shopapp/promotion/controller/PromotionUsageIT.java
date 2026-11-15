@@ -146,6 +146,9 @@ class PromotionUsageIT extends AbstractPromotionIT {
         mockMvc.perform(post("/storefront/promotions/apply-usage").with(customer())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"couponCode\":\"AUTH\"}"))
             .andExpect(status().isBadRequest());
+        // customers only (order relays the customer's token): an admin token is refused (decisions.md 4-75)
+        apply("AUTH", UUID.randomUUID(), admin()).andExpect(status().isForbidden());
+        release(UUID.randomUUID(), admin()).andExpect(status().isForbidden());
         mockMvc.perform(post("/storefront/promotions/apply-usage").param("reference", "not-a-uuid").with(customer())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"couponCode\":\"AUTH\"}"))
             .andExpect(status().isBadRequest());

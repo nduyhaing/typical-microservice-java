@@ -6,14 +6,10 @@ import com.shopapp.search.model.Product;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.BooleanSupplier;
-import org.apache.kafka.clients.admin.NewTopic;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Import;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -27,14 +23,15 @@ import org.testcontainers.kafka.KafkaContainer;
 /**
  * Full application against real Kafka and Elasticsearch (one container each per JVM, small heaps) with product
  * replaced by a {@link ProductStub}; the index and the stub are emptied before each test. Retries are fast here
- * (3 attempts, 200 ms then 400 ms).
+ * (infrastructure failures: 100 ms doubling to 400 ms, unbounded; other failures: 2 retries 100 ms apart).
  */
 @SpringBootTest(properties = {
-    "search.cdc.retry.attempts=3",
-    "search.cdc.retry.delay-ms=200",
-    "search.cdc.retry.multiplier=2"})
+    "search.cdc.retry.initial-interval-ms=100",
+    "search.cdc.retry.multiplier=2",
+    "search.cdc.retry.max-interval-ms=400",
+    "search.cdc.retry.other-attempts=2",
+    "search.cdc.retry.other-interval-ms=100"})
 @AutoConfigureMockMvc
-@Import(AbstractSearchIT.Topics.class)
 public abstract class AbstractSearchIT {
 
     public static final String TOPIC = "dbproduct.public.product";
@@ -126,14 +123,5 @@ public abstract class AbstractSearchIT {
     protected static RequestPostProcessor customer() {
         return jwt().jwt(token -> token.subject("customer-1"))
             .authorities(new SimpleGrantedAuthority("ROLE_CUSTOMER"));
-    }
-
-    /** The CDC topic exists before the listener starts, as in compose (Debezium creates it). */
-    @TestConfiguration(proxyBeanMethods = false)
-    static class Topics {
-        @Bean
-        NewTopic productCdcTopic() {
-            return new NewTopic(TOPIC, 1, (short) 1);
-        }
     }
 }

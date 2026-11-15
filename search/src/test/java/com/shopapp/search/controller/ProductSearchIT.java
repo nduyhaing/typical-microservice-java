@@ -31,7 +31,7 @@ class ProductSearchIT extends AbstractSearchIT {
         PRODUCT.product(4, "MacBook Air", 1299, "Apple", List.of("Laptops"), List.of(), at(1));
         PRODUCT.product(5, "USB-C Cable", 9.9, null, List.of("Accessories"), List.of(), at(1));
         for (long id = 1; id <= 5; id++) {
-            syncService.sync(id);
+            syncService.sync(id, null);
         }
         // a hidden document that slipped into the index must never be returned
         operations.save(Product.builder().id(99L).version(1L).name("Galaxy Secret").price(1.0).brand("Samsung")

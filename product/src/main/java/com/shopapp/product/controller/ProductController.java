@@ -16,6 +16,7 @@ import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductListGetVm;
 import com.shopapp.product.viewmodel.product.ProductListVm;
 import com.shopapp.product.viewmodel.product.ProductPostVm;
+import com.shopapp.product.viewmodel.product.ProductPromotionTargetVm;
 import com.shopapp.product.viewmodel.product.ProductPutVm;
 import com.shopapp.product.viewmodel.product.ProductQuantityDeltaVm;
 import com.shopapp.product.viewmodel.product.ProductQuantityPostVm;
@@ -145,6 +146,17 @@ public class ProductController {
         @Min(1) @Max(MAX_PAGE_SIZE) int pageSize,
         @RequestParam(value = "ids") @Size(max = 100) List<Long> productIds) {
         return ResponseEntity.ok(productService.getProductCheckoutList(pageNo, pageSize, productIds));
+    }
+
+    /**
+     * Not in YAS: promotion's one call per coupon check (decisions.md 4-74). Public catalog data (orderable products'
+     * parent, brand, category ids and price), like the storefront lists; 1..100 ids.
+     */
+    @GetMapping("/storefront/products/promotion-targets")
+    public ResponseEntity<List<ProductPromotionTargetVm>> getPromotionTargets(
+        @RequestParam(value = "ids") @NotEmpty @Size(max = ProductService.MAX_PROMOTION_TARGETS)
+        List<Long> productIds) {
+        return ResponseEntity.ok(productService.getPromotionTargets(productIds));
     }
 
     @GetMapping("/storefront/category/{categorySlug}/products")

@@ -22,10 +22,10 @@ public final class Constants {
     /** Paging bounds: keep pageNo * pageSize within an int offset (decisions.md 2a-10). */
     public static final long MAX_PAGE_NO = 10_000_000;
     public static final long MAX_PAGE_SIZE = 100;
-    /** Products per verify / usage call, and targets (products, brands, categories) per promotion. */
+    /** Products per verify / usage call, and target products per promotion. */
     public static final int MAX_IDS = 100;
-    /** Pages of 100 read per category when resolving category promotions (5000 products per category). */
-    public static final int MAX_CATEGORY_PAGES = 50;
+    /** Target brands or categories per promotion (decisions.md 4-74). */
+    public static final int MAX_GROUP_TARGETS = 50;
     public static final int MAX_FILTER_LENGTH = 450;
 
     private Constants() {

@@ -31,7 +31,7 @@ public class ReindexService {
                 break;
             }
             for (ProductIdPageVm.Item item : ids.productContent()) {
-                switch (syncService.sync(item.id())) {
+                switch (syncService.sync(item.id(), null)) {
                     case INDEXED -> indexed++;
                     case REMOVED -> removed++;
                     default -> { }

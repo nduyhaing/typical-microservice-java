@@ -14,6 +14,9 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'dbz_user') \gexec
 -- REPLICATION opens the logical replication protocol; nothing else (no superuser, no CREATE, no write rights)
 ALTER ROLE :"dbz_user" WITH LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD :'dbz_password';
 GRANT CONNECT ON DATABASE product TO :"dbz_user";
+-- PUBLIC (so also this login) connects nowhere it was not granted (decisions.md 4-81); the services use the owner /
+-- superuser and sampledata has its own CONNECT on product. Every database, also ones created later.
+SELECT format('REVOKE CONNECT ON DATABASE %I FROM PUBLIC', datname) FROM pg_database WHERE NOT datistemplate \gexec
 GRANT USAGE ON SCHEMA public TO :"dbz_user";
 -- the initial snapshot reads the captured table with SELECT
 GRANT SELECT ON public.product TO :"dbz_user";

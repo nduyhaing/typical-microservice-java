@@ -48,6 +48,13 @@ class GatewayRoutesTest {
         "/api/product/backoffice/products/subtract%2Dquantity?reference=r-1",
         "/api/product/backoffice/products/restore-quantity/");
 
+    /** Promotion's order-only coupon usage endpoints (slice 4 review I-3, decisions.md 4-75). */
+    private static final List<String> COUPON_USAGE = List.of(
+        "/api/promotion/storefront/promotions/apply-usage?reference=" + java.util.UUID.randomUUID(),
+        "/api/promotion/storefront/promotions/release-usage?reference=" + java.util.UUID.randomUUID(),
+        "/api/promotion/storefront/promotions/apply%2Dusage?reference=r-1",
+        "/api/promotion/storefront/promotions/release-usage/");
+
     @Autowired
     private WebTestClient client;
 
@@ -125,6 +132,16 @@ class GatewayRoutesTest {
         for (String path : STOCK_WRITES) {
             admin().put().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("[{\"productId\":1,\"quantity\":1}]").exchange()
+                .expectStatus().isForbidden();
+        }
+        assertThat(API_PATH.get()).isNull();
+    }
+
+    @Test
+    void couponUsageEndpoints_areRefused_evenForAnAdmin() {
+        for (String path : COUPON_USAGE) {
+            admin().post().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"couponCode\":\"SAVE10\"}").exchange()
                 .expectStatus().isForbidden();
         }
         assertThat(API_PATH.get()).isNull();

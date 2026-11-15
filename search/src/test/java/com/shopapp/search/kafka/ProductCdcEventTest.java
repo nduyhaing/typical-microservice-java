@@ -48,6 +48,38 @@ class ProductCdcEventTest {
     }
 
     @Test
+    void afterImageUnpublishedOrHidden_unlistsAtTheRowVersion_withoutReadingProduct() {
+        // Debezium sends timestamp(6) columns as microseconds since the epoch (MicroTimestamp)
+        String unpublished = "{\"before\":null,\"after\":{\"id\":7,\"is_published\":false,"
+            + "\"is_visible_individually\":true,\"last_modified_on\":1763164800000002},\"op\":\"u\"}";
+        assertThat(parse("{\"id\":7}", unpublished))
+            .isEqualTo(new ProductCdcEvent(7, Action.UNLIST, 1763164800000002L));
+
+        String hidden = "{\"before\":null,\"after\":{\"id\":7,\"is_published\":true,"
+            + "\"is_visible_individually\":false,\"created_on\":1763164800000000},\"op\":\"c\"}";
+        assertThat(parse("{\"id\":7}", hidden))
+            .isEqualTo(new ProductCdcEvent(7, Action.UNLIST, 1763164800000000L));
+
+        String noTimestamp = "{\"after\":{\"id\":7,\"is_published\":false},\"op\":\"r\"}";
+        assertThat(parse("{\"id\":7}", noTimestamp)).isEqualTo(new ProductCdcEvent(7, Action.UNLIST, null));
+    }
+
+    @Test
+    void afterImagePublishedAndVisible_syncsCarryingTheRowVersion() {
+        String value = "{\"before\":null,\"after\":{\"id\":7,\"is_published\":true,"
+            + "\"is_visible_individually\":true,\"last_modified_on\":1763164800000002},\"op\":\"u\"}";
+        assertThat(parse("{\"id\":7}", value)).isEqualTo(new ProductCdcEvent(7, Action.SYNC, 1763164800000002L));
+    }
+
+    @Test
+    void stockOnlyUpdateOfAnUnpublishedProduct_stillUnlists() {
+        // the unpublish may never have reached the index (e.g. dead-lettered before this fix): remove it anyway
+        String value = "{\"before\":{\"id\":7,\"is_published\":false,\"stock_quantity\":5},"
+            + "\"after\":{\"id\":7,\"is_published\":false,\"stock_quantity\":4},\"op\":\"u\"}";
+        assertThat(parse("{\"id\":7}", value).action()).isEqualTo(Action.UNLIST);
+    }
+
+    @Test
     void schemaEnvelope_isUnwrapped() {
         assertThat(parse("{\"schema\":{},\"payload\":{\"id\":9}}",
             "{\"schema\":{},\"payload\":{\"before\":null,\"after\":{\"id\":9},\"op\":\"c\"}}"))

@@ -331,6 +331,8 @@ describe('Checkout page', () => {
       expect(await screen.findByText(text)).toBeInTheDocument();
       expect(screen.queryByTestId('checkout-discount')).not.toBeInTheDocument();
       expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
+      // the refused code is still typed: clear it to order without a coupon
+      await userEvent.clear(screen.getByLabelText('Coupon code'));
       await placeWithDefaultAddress();
       expect(orderService.placeOrder).toHaveBeenCalledWith(expect.not.objectContaining({ couponCode: expect.anything() }));
     });
@@ -348,6 +350,58 @@ describe('Checkout page', () => {
 
       expect(await screen.findByText('The coupon could not be checked right now. Please try again later.')).toBeInTheDocument();
       expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
+    });
+
+    it('a typed but not applied code blocks Place order with a hint (decisions.md 4-79)', async () => {
+      render(<CheckoutPage />);
+      await waitFor(() => expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$163.80'));
+
+      await userEvent.type(screen.getByLabelText('Coupon code'), 'SAVE10');
+
+      expect(screen.getByRole('button', { name: 'Place order' })).toBeDisabled();
+      expect(screen.getByText('Apply the coupon code, or clear it, before placing the order.')).toBeInTheDocument();
+      await userEvent.clear(screen.getByLabelText('Coupon code'));
+      expect(screen.getByRole('button', { name: 'Place order' })).toBeEnabled();
+    });
+
+    it('promotion down while re-pricing with an applied coupon says the coupon could not be checked, not tax', async () => {
+      let promotionUp = true;
+      vi.mocked(orderService.previewOrder).mockImplementation(async (_id, address, couponCode) => {
+        if (couponCode === undefined) {
+          return 'shippingAddressId' in address && address.shippingAddressId === 101 ? taxedPreview : untaxedPreview;
+        }
+        if (!promotionUp) {
+          throw new ApiError(500, { detail: 'Promotion service is unavailable, please try again later' });
+        }
+        return discountedPreview;
+      });
+      render(<CheckoutPage />);
+      await applyCoupon('SAVE10');
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62'));
+
+      promotionUp = false;
+      await userEvent.click(screen.getByRole('radio', { name: /Customer Office/ }));
+
+      expect(
+        await screen.findByText('The coupon could not be checked right now. Please try again later, or remove it.')
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Tax could not be calculated right now. Please try again later.')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Place order' })).toBeDisabled();
+    });
+
+    it('promotion down while placing the order says the coupon could not be checked', async () => {
+      vi.mocked(orderService.placeOrder).mockRejectedValue(
+        new ApiError(500, { detail: 'Promotion service is unavailable, please try again later' })
+      );
+      render(<CheckoutPage />);
+      await applyCoupon('SAVE10');
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62'));
+
+      await placeWithDefaultAddress();
+
+      expect(
+        await screen.findByText(/The coupon could not be checked right now\. Remove it to order without the discount\./)
+      ).toBeInTheDocument();
     });
 
     it('places the order with the applied code', async () => {

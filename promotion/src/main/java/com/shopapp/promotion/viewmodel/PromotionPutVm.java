@@ -37,7 +37,7 @@ public record PromotionPutVm(
     @NotNull Instant endDate,
     @NotNull ApplyTo applyTo,
     @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> productIds,
-    @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> brandIds,
-    @Size(max = Constants.MAX_IDS) List<@NotNull @Positive Long> categoryIds
+    @Size(max = Constants.MAX_GROUP_TARGETS) List<@NotNull @Positive Long> brandIds,
+    @Size(max = Constants.MAX_GROUP_TARGETS) List<@NotNull @Positive Long> categoryIds
 ) implements PromotionInput {
 }

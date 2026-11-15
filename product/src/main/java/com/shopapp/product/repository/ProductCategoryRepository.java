@@ -2,6 +2,7 @@ package com.shopapp.product.repository;
 
 import com.shopapp.product.model.Category;
 import com.shopapp.product.model.ProductCategory;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -23,6 +24,18 @@ public interface ProductCategoryRepository extends JpaRepository<ProductCategory
     Page<ProductCategory> findStorefrontByCategory(@Param("category") Category category, Pageable pageable);
 
     List<ProductCategory> findAllByProductId(Long productId);
+
+    /** (product id, category id) pairs of these products, in one query. */
+    @Query("SELECT pc.product.id AS productId, pc.category.id AS categoryId FROM ProductCategory pc "
+        + "WHERE pc.product.id IN :productIds")
+    List<CategoryLink> findCategoryLinks(@Param("productIds") Collection<Long> productIds);
+
+    /** One row of {@link #findCategoryLinks}. */
+    interface CategoryLink {
+        Long getProductId();
+
+        Long getCategoryId();
+    }
 
     boolean existsByCategoryId(Long categoryId);
 }

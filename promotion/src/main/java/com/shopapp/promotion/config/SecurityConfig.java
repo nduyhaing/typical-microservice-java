@@ -18,8 +18,10 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     /**
-     * Admin CRUD under /backoffice needs realm role ADMIN; the storefront verify / usage endpoints need any
-     * authenticated user (YAS: permitAll, decisions.md 4-45) because usage is recorded per user.
+     * Admin CRUD under /backoffice needs realm role ADMIN; the storefront verify / usage endpoints need realm role
+     * CUSTOMER (YAS: permitAll; 4-45 amended by 4-75): usage is recorded per customer, order calls them with the
+     * customer's token. apply-usage / release-usage are also refused at nginx and in both BFFs (order calls promotion
+     * on the compose network), so a customer cannot burn or give back coupon uses by hand.
      */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -28,6 +30,7 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/prometheus", "/actuator/health/**", "/swagger-ui", "/swagger-ui/**",
                     "/error", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/backoffice/**").hasRole("ADMIN")
+                .requestMatchers("/storefront/promotions/**").hasRole("CUSTOMER")
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))
             .build();

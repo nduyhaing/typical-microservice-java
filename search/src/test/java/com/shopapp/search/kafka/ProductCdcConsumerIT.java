@@ -6,6 +6,8 @@ import com.shopapp.search.model.Product;
 import com.shopapp.search.service.ProductSyncService;
 import com.shopapp.search.support.AbstractSearchIT;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -113,14 +115,14 @@ class ProductCdcConsumerIT extends AbstractSearchIT {
     @Test
     void olderReadOfTheProduct_neverOverwritesANewerDocument() {
         galaxy(9, "Galaxy S24 Ultra", 20);
-        assertThat(syncService.sync(9)).isEqualTo(ProductSyncService.Outcome.INDEXED);
+        assertThat(syncService.sync(9, null)).isEqualTo(ProductSyncService.Outcome.INDEXED);
 
         galaxy(9, "Galaxy S24", 10); // a slow read that started before the rename
-        assertThat(syncService.sync(9)).isEqualTo(ProductSyncService.Outcome.STALE);
+        assertThat(syncService.sync(9, null)).isEqualTo(ProductSyncService.Outcome.STALE);
         assertThat(document(9).getName()).isEqualTo("Galaxy S24 Ultra");
 
         galaxy(9, "Galaxy S24 Ultra", 20); // the same version again (reindex): accepted
-        assertThat(syncService.sync(9)).isEqualTo(ProductSyncService.Outcome.INDEXED);
+        assertThat(syncService.sync(9, null)).isEqualTo(ProductSyncService.Outcome.INDEXED);
     }
 
     @Test
@@ -151,33 +153,92 @@ class ProductCdcConsumerIT extends AbstractSearchIT {
     }
 
     @Test
-    void productDownForAWhile_isRetriedUntilItAnswers() throws Exception {
+    void productDownForLongerThanABoundedRetryChain_isRetriedUntilItAnswers_andNeverDeadLettered() throws Exception {
         galaxy(14, "Galaxy S24", 1);
         PRODUCT.down(14);
 
         send(14, event("c", 14));
-        await("first attempt failed", () -> PRODUCT.detailRequests(14) >= 1);
+        // back-off 100 ms doubling to 400 ms here (production: 1 s doubling to 2 min, unbounded)
+        await("product keeps being retried", () -> PRODUCT.detailRequests(14) >= 6);
+        Thread.sleep(1_000);
+        assertThat(indexed(14)).isFalse();
         PRODUCT.up(14);
 
-        await("indexed after a retry", () -> indexed(14));
-        assertThat(PRODUCT.detailRequests(14)).isGreaterThanOrEqualTo(2);
+        await("indexed once product answers", () -> indexed(14));
+        assertThat(deadLetters("{\"id\":14}", 1, Duration.ofSeconds(2))).isEmpty();
     }
 
     @Test
-    void productDownForGood_endsOnTheDltAfterAllAttempts() throws Exception {
+    void unpublishWhileProductIsDown_removesTheDocumentWithoutCallingProduct() throws Exception {
         galaxy(15, "Galaxy S24", 1);
+        send(15, event("c", 15));
+        await("indexed", () -> indexed(15));
         PRODUCT.down(15);
 
-        send(15, event("c", 15));
+        send(15, image(15, false, true, at(2)));
 
-        List<ConsumerRecord<String, String>> dead = deadLetters("{\"id\":15}", 1);
-        assertThat(dead).hasSize(1);
-        assertThat(PRODUCT.detailRequests(15)).isEqualTo(3);
-        assertThat(indexed(15)).isFalse();
+        await("removed although product is down", () -> !indexed(15));
+        assertThat(PRODUCT.detailRequests(15)).isEqualTo(1);
     }
 
-    /** Reads the DLT from the start until {@code expected} records with that key are seen (15 s at most). */
+    @Test
+    void hiddenAfterImage_removesTheDocument() throws Exception {
+        galaxy(16, "Galaxy S24", 1);
+        send(16, event("c", 16));
+        await("indexed", () -> indexed(16));
+
+        send(16, image(16, true, false, at(2)));
+
+        await("removed", () -> !indexed(16));
+        assertThat(PRODUCT.detailRequests(16)).isEqualTo(1);
+    }
+
+    @Test
+    void lateUnpublishEvent_neverRemovesALaterRepublish() throws Exception {
+        galaxy(17, "Galaxy S24", 20); // republished at second 20 and indexed
+        send(17, image(17, true, true, at(20)));
+        await("indexed", () -> indexed(17));
+
+        send(17, image(17, false, true, at(10))); // the unpublish at second 10, delivered late
+        galaxy(18, "Marker", 1);
+        send(18, event("c", 18));
+
+        await("marker after the late event", () -> indexed(18));
+        assertThat(indexed(17)).isTrue();
+    }
+
+    @Test
+    void stale404_neverRemovesALaterRepublish() {
+        galaxy(19, "Galaxy S24", 20);
+        assertThat(syncService.sync(19, null)).isEqualTo(ProductSyncService.Outcome.INDEXED);
+
+        // an event of second 10 whose product read answered 404 (unpublished then) is applied after the republish
+        PRODUCT.remove(19);
+        assertThat(syncService.sync(19, micros(at(10)))).isEqualTo(ProductSyncService.Outcome.STALE);
+        assertThat(indexed(19)).isTrue();
+
+        // the same 404 for an event at or after the indexed version removes the document
+        assertThat(syncService.sync(19, micros(at(20)))).isEqualTo(ProductSyncService.Outcome.REMOVED);
+        assertThat(indexed(19)).isFalse();
+    }
+
+    private static long micros(Instant instant) {
+        return ChronoUnit.MICROS.between(Instant.EPOCH, instant);
+    }
+
+    /** An update whose after image carries the flags and the modification time as Debezium sends them. */
+    private static String image(long id, boolean published, boolean visible, Instant modified) {
+        return "{\"before\":null,\"after\":{\"id\":" + id + ",\"is_published\":" + published
+            + ",\"is_visible_individually\":" + visible + ",\"last_modified_on\":" + micros(modified)
+            + "},\"op\":\"u\",\"source\":{}}";
+    }
+
     private static List<ConsumerRecord<String, String>> deadLetters(String key, int expected) {
+        return deadLetters(key, expected, Duration.ofSeconds(15));
+    }
+
+    /** Reads the DLT from the start until {@code expected} records with that key are seen ({@code wait} at most). */
+    private static List<ConsumerRecord<String, String>> deadLetters(String key, int expected, Duration wait) {
         Map<String, Object> config = Map.of(
             ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers(),
             ConsumerConfig.GROUP_ID_CONFIG, "dlt-reader-" + UUID.randomUUID(),
@@ -186,7 +247,7 @@ class ProductCdcConsumerIT extends AbstractSearchIT {
             ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         List<ConsumerRecord<String, String>> found = new ArrayList<>();
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(config)) {
-            long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+            long deadline = System.nanoTime() + wait.toNanos();
             boolean assigned = false;
             while (found.size() < expected && System.nanoTime() < deadline) {
                 if (!assigned) {

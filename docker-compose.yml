@@ -626,10 +626,8 @@ services:
         condition: service_healthy
       inventory:
         condition: service_healthy
-      promotion:
-        condition: service_healthy
-      rating:
-        condition: service_healthy
+      # promotion, rating, search, media, recommendation, sampledata: optional (the pages say "not available"
+      # when they are down); with the variable proxy_pass nginx starts without them (decisions.md 4-18, 4-76)
       storefront-bff:
         condition: service_healthy
       backoffice-bff:

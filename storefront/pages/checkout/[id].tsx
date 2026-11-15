@@ -40,6 +40,12 @@ function detailOf(error: unknown): string | undefined {
 }
 
 const COUPON_UNAVAILABLE = 'The coupon could not be checked right now. Please try again later.';
+const COUPON_PENDING = 'Apply the coupon code, or clear it, before placing the order.';
+
+/** Order's 500 when promotion is down or slow (its PromotionService.UNAVAILABLE text). */
+function isPromotionUnavailable(error: unknown): boolean {
+  return error instanceof ApiError && error.status >= 500 && !!detailOf(error)?.startsWith('Promotion service');
+}
 
 function previewProblem(error: Error | undefined): string | undefined {
   if (!error) {
@@ -49,6 +55,10 @@ function previewProblem(error: Error | undefined): string | undefined {
   if (couponProblem) {
     // e.g. the applied coupon was used up meanwhile: "Remove" prices the order without it
     return couponProblem;
+  }
+  if (isPromotionUnavailable(error)) {
+    // an applied coupon is re-checked on every re-pricing; promotion down is not a tax problem (4-79)
+    return 'The coupon could not be checked right now. Please try again later, or remove it.';
   }
   if (error instanceof ApiError && error.status === 404) {
     return 'This address is no longer in your address book. Please choose another one.';
@@ -98,6 +108,8 @@ export default function CheckoutPage() {
   const notFound = error instanceof ApiError && error.status === 404;
   const priced = !!addressChoice && !!preview.data && !preview.loading;
   const problem = addressChoice ? previewProblem(preview.error) : undefined;
+  // a typed code that was never applied would silently be dropped: Place order waits for Apply or a clear (4-79)
+  const couponPending = !appliedCode && couponInput.trim() !== '';
 
   // the server verifies the code: it is applied only when a preview with it succeeds
   const handleApplyCoupon = async () => {
@@ -126,7 +138,7 @@ export default function CheckoutPage() {
   };
 
   const handlePlaceOrder = async () => {
-    if (!checkout || !addressChoice || !priced) {
+    if (!checkout || !addressChoice || !priced || couponPending) {
       return;
     }
     setSubmitting(true);
@@ -149,6 +161,11 @@ export default function CheckoutPage() {
       } else if (couponProblem) {
         // e.g. the coupon was used up between the preview and the order
         setSubmitError({ kind: 'coupon', detail: `${couponProblem} Remove it to order without the discount.` });
+      } else if (appliedCode && isPromotionUnavailable(error)) {
+        setSubmitError({
+          kind: 'coupon',
+          detail: 'The coupon could not be checked right now. Remove it to order without the discount.',
+        });
       } else if (error instanceof ApiError && error.status === 400 && detail?.includes('already been ordered')) {
         setSubmitError({ kind: 'ordered' });
       } else if (error instanceof ApiError && (error.status === 400 || error.status === 404) && detail) {
@@ -214,7 +231,8 @@ export default function CheckoutPage() {
                 {submitError.detail} <Link href="/cart">Back to the cart</Link>
               </Alert>
             )}
-            <Button onClick={handlePlaceOrder} disabled={!priced || submitting}>
+            {couponPending && <p className="text-muted small mb-2">{COUPON_PENDING}</p>}
+            <Button onClick={handlePlaceOrder} disabled={!priced || submitting || couponPending}>
               Place order
             </Button>
           </Col>

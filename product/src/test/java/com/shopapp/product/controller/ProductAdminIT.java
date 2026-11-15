@@ -1,5 +1,6 @@
 package com.shopapp.product.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -15,10 +16,13 @@ import com.shopapp.product.model.Brand;
 import com.shopapp.product.model.Category;
 import com.shopapp.product.model.Product;
 import com.shopapp.product.support.AbstractStorefrontIT;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
@@ -28,6 +32,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
  * update, soft delete, product options; changes show up on the storefront.
  */
 class ProductAdminIT extends AbstractStorefrontIT {
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private static RequestPostProcessor admin() {
         return jwt().authorities(new SimpleGrantedAuthority("ROLE_ADMIN"));
@@ -330,6 +337,35 @@ class ProductAdminIT extends AbstractStorefrontIT {
             .andExpect(jsonPath("$.productCategories").value(containsInAnyOrder("Phones")));
         mockMvc.perform(get("/storefront/products").param("productName", "iphone"))
             .andExpect(jsonPath("$.productContent[0].price").value(899.0));
+    }
+
+    @Test
+    void updateProduct_changingOnlyCategories_touchesTheProductRow() throws Exception {
+        // Debezium captures the product row only: a categories-only edit must still update it, or search never
+        // hears of it (decisions.md 4-73)
+        Category phones = fixtures.category("Phones", "phones");
+        Category tablets = fixtures.category("Tablets", "tablets");
+        Product iphone = fixtures.product("iPhone 15", "iphone-15", 999);
+        iphone.setSku("IP15");
+        fixtures.save(iphone);
+        fixtures.inCategory(iphone, phones);
+        String body = simple("iPhone 15", "iphone-15", "IP15", 999, null, "[" + phones.getId() + "]");
+        mockMvc.perform(json(put("/backoffice/products/{id}", iphone.getId()), body).with(admin()))
+            .andExpect(status().isNoContent());
+        Timestamp before = lastModifiedOn(iphone.getId());
+
+        Thread.sleep(5);
+        mockMvc.perform(json(put("/backoffice/products/{id}", iphone.getId()),
+                simple("iPhone 15", "iphone-15", "IP15", 999, null, "[" + tablets.getId() + "]")).with(admin()))
+            .andExpect(status().isNoContent());
+
+        assertThat(lastModifiedOn(iphone.getId())).isAfter(before);
+        mockMvc.perform(get("/storefront/products-es/{id}", iphone.getId()))
+            .andExpect(jsonPath("$.categories").value(containsInAnyOrder("Tablets")));
+    }
+
+    private Timestamp lastModifiedOn(long id) {
+        return jdbc.queryForObject("select last_modified_on from product where id = ?", Timestamp.class, id);
     }
 
     @Test

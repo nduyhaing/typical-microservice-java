@@ -21,7 +21,7 @@ import com.shopapp.promotion.viewmodel.PromotionPutVm;
 import com.shopapp.promotion.viewmodel.PromotionUsageResultVm;
 import com.shopapp.promotion.viewmodel.PromotionVerifyResultDto;
 import com.shopapp.promotion.viewmodel.PromotionVerifyVm;
-import com.shopapp.promotion.viewmodel.product.ProductCheckoutVm;
+import com.shopapp.promotion.viewmodel.product.ProductTargetVm;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Comparator;
@@ -107,17 +107,17 @@ public class PromotionService {
             throw new PromotionException(ErrorCode.MINIMUM_ORDER_NOT_REACHED, promotion.getCouponCode(),
                 promotion.getMinimumOrderPurchaseAmount().toPlainString());
         }
-        List<ProductCheckoutVm> eligible = eligibleProducts(promotion, vm.productIds().stream().distinct().toList());
+        List<ProductTargetVm> eligible = eligibleProducts(promotion, vm.productIds().stream().distinct().toList());
         if (eligible.isEmpty()) {
             throw new PromotionException(ErrorCode.PROMOTION_NOT_APPLICABLE, promotion.getCouponCode());
         }
         Long cheapest = eligible.stream()
-            .min(Comparator.comparing(ProductCheckoutVm::price, Comparator.nullsLast(Comparator.naturalOrder())))
-            .map(ProductCheckoutVm::id)
+            .min(Comparator.comparing(ProductTargetVm::price, Comparator.nullsLast(Comparator.naturalOrder())))
+            .map(ProductTargetVm::id)
             .orElseThrow();
         BigDecimal discountValue = promotion.getDiscountType() == DiscountType.FIXED
             ? promotion.getDiscountAmount() : promotion.getDiscountPercentage();
-        return new PromotionVerifyResultDto(true, cheapest, eligible.stream().map(ProductCheckoutVm::id).toList(),
+        return new PromotionVerifyResultDto(true, cheapest, eligible.stream().map(ProductTargetVm::id).toList(),
             promotion.getCouponCode(), promotion.getDiscountType(), discountValue, promotion.getId(),
             promotion.getName());
     }
@@ -196,30 +196,20 @@ public class PromotionService {
     }
 
     /**
-     * The requested products (orderable ones, in request order) the promotion applies to. A variation counts through
-     * its parent: PRODUCT matches the product or its parent; BRAND matches the product's brand, or for a variation
-     * without a brand, its parent being a product of the brand; CATEGORY matches the product or its parent being
-     * directly in one of the categories.
+     * The requested products (orderable ones, in request order) the promotion applies to, from one product call
+     * (decisions.md 4-74). A variation counts through its parent: PRODUCT matches the product or its parent; BRAND
+     * matches the product's brand (a variation without one has its parent's); CATEGORY matches a category of the
+     * product or of its parent.
      */
-    private List<ProductCheckoutVm> eligibleProducts(Promotion promotion, List<Long> productIds) {
-        List<ProductCheckoutVm> products = productService.getOrderableProducts(productIds);
+    private List<ProductTargetVm> eligibleProducts(Promotion promotion, List<Long> productIds) {
+        List<ProductTargetVm> products = productService.getOrderableProducts(productIds);
         Set<Long> targets = Set.copyOf(PromotionInputs.targetIds(promotion));
-        Predicate<ProductCheckoutVm> eligible = switch (promotion.getApplyTo()) {
+        Predicate<ProductTargetVm> eligible = switch (promotion.getApplyTo()) {
             case PRODUCT -> product -> targets.contains(product.id()) || contains(targets, product.parentId());
-            case BRAND -> {
-                boolean needParents = products.stream()
-                    .anyMatch(product -> product.brandId() == null && product.parentId() != null);
-                Set<Long> brandProducts = needParents ? productService.getProductIdsOfBrands(targets) : Set.of();
-                yield product -> contains(targets, product.brandId())
-                    || product.brandId() == null && contains(brandProducts, product.parentId());
-            }
-            case CATEGORY -> {
-                Set<Long> categoryProducts = productService.getProductIdsOfCategories(targets);
-                yield product -> categoryProducts.contains(product.id())
-                    || contains(categoryProducts, product.parentId());
-            }
+            case BRAND -> product -> contains(targets, product.brandId());
+            case CATEGORY -> product -> product.categoryIds().stream().anyMatch(targets::contains);
         };
-        List<ProductCheckoutVm> matching = products.stream().filter(eligible).toList();
+        List<ProductTargetVm> matching = products.stream().filter(eligible).toList();
         return productIds.stream()
             .flatMap(id -> matching.stream().filter(product -> id.equals(product.id())).limit(1))
             .toList();
