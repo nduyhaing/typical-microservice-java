@@ -3,11 +3,13 @@ import Card from 'react-bootstrap/Card';
 import Col from 'react-bootstrap/Col';
 import Row from 'react-bootstrap/Row';
 import Layout, { NAV_GROUPS } from '../common/components/Layout';
+import LatestRatings from '../modules/home/components/LatestRatings';
 
 export default function HomePage() {
   return (
     <Layout title="Dashboard">
       <h1 className="h3 mb-4">Back office</h1>
+      <LatestRatings />
       {NAV_GROUPS.map((group) => {
         const headingId = `dashboard-${group.label.toLowerCase()}`;
         return (

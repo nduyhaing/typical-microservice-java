@@ -21,6 +21,7 @@ export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
       { href: '/catalog/brands', label: 'Brands', description: 'Create, rename, publish and delete brands.' },
       { href: '/catalog/categories', label: 'Categories', description: 'Organise the category tree shown in the storefront.' },
       { href: '/catalog/products', label: 'Products', description: 'Products, prices, flags, options and variations.' },
+      { href: '/reviews', label: 'Reviews', description: "Customers' product reviews: search and delete." },
     ],
   },
   {
