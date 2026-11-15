@@ -7,5 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
+    // the product form tests type a lot (2.5 s alone); with every file running in parallel 5 s was too tight
+    testTimeout: 20000,
   },
 });

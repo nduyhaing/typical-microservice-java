@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import * as authService from '../modules/auth/services/AuthenticationService';
 import HomePage from '../pages/index';
@@ -12,7 +13,7 @@ vi.mock('../modules/auth/services/AuthenticationService', async (original) => ({
 afterEach(() => vi.resetAllMocks());
 
 describe('Back office layout and dashboard', () => {
-  it('shows the catalog navigation, the admin user and a logout form', async () => {
+  it('shows the navigation grouped like YAS, the admin user and a logout form', async () => {
     vi.mocked(authService.getAuthentication).mockResolvedValue({
       isAuthenticated: true,
       authenticatedUser: { username: 'admin' },
@@ -22,16 +23,30 @@ describe('Back office layout and dashboard', () => {
 
     expect(await screen.findByText('admin')).toBeInTheDocument();
     const nav = screen.getByRole('navigation');
-    expect(nav).toContainElement(screen.getAllByRole('link', { name: 'Brands' })[0]);
-    for (const [name, href] of [
-      ['Brands', '/catalog/brands'],
-      ['Categories', '/catalog/categories'],
-      ['Products', '/catalog/products'],
-    ]) {
-      const links = screen.getAllByRole('link', { name });
-      // one in the navigation, one on the dashboard
-      expect(links).toHaveLength(2);
-      links.forEach((link) => expect(link).toHaveAttribute('href', href));
+    const groups: [string, [string, string][]][] = [
+      ['Catalog', [['Brands', '/catalog/brands'], ['Categories', '/catalog/categories'], ['Products', '/catalog/products']]],
+      ['Location', [['Countries', '/location/countries'], ['States or provinces', '/location/state-or-provinces']]],
+      ['Tax', [['Tax classes', '/tax/tax-classes'], ['Tax rates', '/tax/tax-rates']]],
+      [
+        'Inventory',
+        [
+          ['Warehouses', '/inventory/warehouses'],
+          ['Warehouse stocks', '/inventory/warehouse-stocks'],
+          ['Warehouse products', '/inventory/warehouse-products'],
+        ],
+      ],
+    ];
+    for (const [group, links] of groups) {
+      // the dashboard lists every page under its group heading
+      const section = screen.getByRole('region', { name: group });
+      for (const [name, href] of links) {
+        expect(within(section).getByRole('link', { name })).toHaveAttribute('href', href);
+      }
+      // the navigation opens a dropdown per group
+      await userEvent.click(within(nav).getByRole('button', { name: group }));
+      for (const [name, href] of links) {
+        expect(within(nav).getByRole('link', { name })).toHaveAttribute('href', href);
+      }
     }
     const logout = screen.getByRole('button', { name: 'Log out' }).closest('form')!;
     expect(logout).toHaveAttribute('action', '/logout');

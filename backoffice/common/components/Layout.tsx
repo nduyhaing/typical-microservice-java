@@ -4,16 +4,59 @@ import { ReactNode } from 'react';
 import Button from 'react-bootstrap/Button';
 import Container from 'react-bootstrap/Container';
 import Nav from 'react-bootstrap/Nav';
+import NavDropdown from 'react-bootstrap/NavDropdown';
 import Navbar from 'react-bootstrap/Navbar';
 import { getAuthentication, LOGOUT_URL } from '../../modules/auth/services/AuthenticationService';
 import { useFetch } from '../hooks/useFetch';
 
 type Props = { title?: string; children: ReactNode };
 
-export const NAV_LINKS = [
-  { href: '/catalog/brands', label: 'Brands' },
-  { href: '/catalog/categories', label: 'Categories' },
-  { href: '/catalog/products', label: 'Products' },
+export type NavLink = { href: string; label: string; description: string };
+
+/** Navigation grouped like YAS's sidebar (Catalog, Location, Tax, Inventory); the dashboard lists the same pages. */
+export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
+  {
+    label: 'Catalog',
+    links: [
+      { href: '/catalog/brands', label: 'Brands', description: 'Create, rename, publish and delete brands.' },
+      { href: '/catalog/categories', label: 'Categories', description: 'Organise the category tree shown in the storefront.' },
+      { href: '/catalog/products', label: 'Products', description: 'Products, prices, flags, options and variations.' },
+    ],
+  },
+  {
+    label: 'Location',
+    links: [
+      { href: '/location/countries', label: 'Countries', description: 'Countries, their codes and address options.' },
+      {
+        href: '/location/state-or-provinces',
+        label: 'States or provinces',
+        description: 'States or provinces per country, and their districts.',
+      },
+    ],
+  },
+  {
+    label: 'Tax',
+    links: [
+      { href: '/tax/tax-classes', label: 'Tax classes', description: 'Tax classes that products refer to.' },
+      { href: '/tax/tax-rates', label: 'Tax rates', description: 'Rates per tax class, country, state and zip code.' },
+    ],
+  },
+  {
+    label: 'Inventory',
+    links: [
+      { href: '/inventory/warehouses', label: 'Warehouses', description: 'Warehouses and their addresses.' },
+      {
+        href: '/inventory/warehouse-stocks',
+        label: 'Warehouse stocks',
+        description: 'Stock per warehouse: adjust quantities with a note, see the history.',
+      },
+      {
+        href: '/inventory/warehouse-products',
+        label: 'Warehouse products',
+        description: 'Add stock-tracked products to a warehouse.',
+      },
+    ],
+  },
 ];
 
 function AccountMenu() {
@@ -47,10 +90,14 @@ export default function Layout({ title, children }: Props) {
             shop_app back office
           </Navbar.Brand>
           <Nav className="me-auto">
-            {NAV_LINKS.map((link) => (
-              <Nav.Link key={link.href} as={Link} href={link.href}>
-                {link.label}
-              </Nav.Link>
+            {NAV_GROUPS.map((group) => (
+              <NavDropdown key={group.label} title={group.label} id={`nav-${group.label.toLowerCase()}`}>
+                {group.links.map((link) => (
+                  <NavDropdown.Item key={link.href} as={Link} href={link.href}>
+                    {link.label}
+                  </NavDropdown.Item>
+                ))}
+              </NavDropdown>
             ))}
           </Nav>
           <AccountMenu />

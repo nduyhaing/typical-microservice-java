@@ -14,6 +14,7 @@ import { ProductDetail, ProductOption, ProductPayload, ProductVariationGet } fro
 import { getBrands } from '../services/BrandService';
 import { getCategories } from '../services/CategoryService';
 import { getProductOptions } from '../services/ProductOptionService';
+import { getTaxClasses } from '../../tax/services/TaxClassService';
 import {
   isValidPrice,
   optionsFromVariations,
@@ -36,7 +37,6 @@ type Kept = Pick<
   | 'metaKeyword'
   | 'metaDescription'
   | 'relatedProductIds'
-  | 'taxClassId'
 >;
 
 export type ProductFormValues = {
@@ -54,6 +54,8 @@ export type ProductFormValues = {
   isAllowedToOrder: boolean;
   isVisibleIndividually: boolean;
   stockTrackingEnabled: boolean;
+  /** Tax class id as the select value; '' = none (sent as null). */
+  taxClassId: string;
   options: OptionInput[];
   variations: VariationInput[];
   /** Thumbnail and gallery images (ids sent as thumbnailMediaId / productImageIds; an update replaces them). */
@@ -78,6 +80,7 @@ export const NEW_PRODUCT: ProductFormValues = {
   isAllowedToOrder: true,
   isVisibleIndividually: true,
   stockTrackingEnabled: false,
+  taxClassId: '',
   options: [],
   variations: [],
   thumbnail: null,
@@ -93,7 +96,6 @@ export const NEW_PRODUCT: ProductFormValues = {
     metaKeyword: '',
     metaDescription: '',
     relatedProductIds: [],
-    taxClassId: null,
   },
 };
 
@@ -119,6 +121,7 @@ export function toFormValues(
     isAllowedToOrder: Boolean(product.isAllowedToOrder),
     isVisibleIndividually: Boolean(product.isVisible),
     stockTrackingEnabled: Boolean(product.stockTrackingEnabled),
+    taxClassId: product.taxClassId == null ? '' : String(product.taxClassId),
     options: optionsFromVariations(variations, allOptions).map((o) => ({
       id: o.id,
       name: o.name,
@@ -138,7 +141,6 @@ export function toFormValues(
       metaKeyword: product.metaKeyword ?? '',
       metaDescription: product.metaDescription ?? '',
       relatedProductIds,
-      taxClassId: product.taxClassId,
     },
   };
 }
@@ -171,6 +173,7 @@ export function toPayload(values: ProductFormValues, isNew: boolean): ProductPay
     isVisibleIndividually: values.isVisibleIndividually,
     stockTrackingEnabled: values.stockTrackingEnabled,
     ...values.kept,
+    taxClassId: values.taxClassId ? Number(values.taxClassId) : null,
     thumbnailMediaId: values.thumbnail?.id ?? null,
     productImageIds: values.images.map((image) => image.id),
     variations,
@@ -208,6 +211,7 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
   const { data: brands } = useFetch(getBrands);
   const { data: categories } = useFetch(getCategories);
   const { data: loadedOptions } = useFetch(getProductOptions);
+  const { data: taxClasses, error: taxClassesError } = useFetch(getTaxClasses);
   const options = [...(loadedOptions ?? []), ...createdOptions.filter((c) => !loadedOptions?.some((o) => o.id === c.id))];
 
   const set = (patch: Partial<ProductFormValues>) => setValues((v) => ({ ...v, ...patch }));
@@ -309,6 +313,25 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
               </option>
             ))}
           </Form.Select>
+        </Form.Group>
+        <Form.Group as={Col} md={6} controlId="product-tax-class">
+          <Form.Label>Tax class</Form.Label>
+          <Form.Select value={values.taxClassId} onChange={(e) => set({ taxClassId: e.target.value })}>
+            <option value="">None</option>
+            {(taxClasses ?? []).map((t) => (
+              <option key={t.id} value={String(t.id)}>
+                {t.name}
+              </option>
+            ))}
+            {values.taxClassId && !taxClasses?.some((t) => String(t.id) === values.taxClassId) && (
+              // a class deleted in tax (3c-14), or the list is not loaded: kept unless another one is chosen
+              <option value={values.taxClassId}>
+                Tax class #{values.taxClassId}
+                {taxClasses ? ' (not found)' : ''}
+              </option>
+            )}
+          </Form.Select>
+          {taxClassesError && <Form.Text>Tax classes could not be loaded; the current tax class is kept.</Form.Text>}
         </Form.Group>
         <Col md={6}>
           <fieldset>
