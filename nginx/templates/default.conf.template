@@ -179,6 +179,18 @@ server {
         proxy_set_header X-Forwarded-Proto $forwarded_proto;
     }
 
+    # admin-only sample data loader; nginx does not wait for it (a dev convenience, decisions.md 5-50)
+    location /sampledata/ {
+        set $upstream_sampledata sampledata:8080;
+        proxy_pass http://$upstream_sampledata;
+        proxy_set_header Host $http_host;
+        # never pass client-supplied forwarding headers that could pick the base URL (decisions.md 2b-12)
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+    }
+
     # Any other path: no service there (yet).
     location / {
         default_type application/json;

@@ -32,6 +32,7 @@
         <module>promotion</module>
         <module>rating</module>
         <module>search</module>
+        <module>sampledata</module>
     </modules>
 
     <properties>

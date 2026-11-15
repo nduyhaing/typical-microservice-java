@@ -4,6 +4,7 @@ import Col from 'react-bootstrap/Col';
 import Row from 'react-bootstrap/Row';
 import Layout, { NAV_GROUPS } from '../common/components/Layout';
 import LatestRatings from '../modules/home/components/LatestRatings';
+import SampleDataCard from '../modules/sampledata/components/SampleDataCard';
 
 export default function HomePage() {
   return (
@@ -34,6 +35,7 @@ export default function HomePage() {
           </section>
         );
       })}
+      <SampleDataCard />
     </Layout>
   );
 }

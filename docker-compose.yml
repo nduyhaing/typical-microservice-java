@@ -493,6 +493,44 @@ services:
     networks:
       - shopapp-network
 
+  # one-shot: the "sampledata" login and its catalog-only grants in the product DB (idempotent; needs product's
+  # tables) (decisions.md 5-53)
+  sampledata-db-init:
+    image: postgres:16.16
+    command: ["psql", "-q", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "product", "-f", "/sql/sampledata-user.sql"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      SAMPLEDATA_DB_PASSWORD: ${SAMPLEDATA_DB_PASSWORD}
+    volumes:
+      - ./docker/postgres/sampledata-user.sql:/sql/sampledata-user.sql:ro
+      - ./docker/postgres/sampledata-grants.sql:/sql/sampledata-grants.sql:ro
+    depends_on:
+      product:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # admin action "Load sample data": no database of its own, writes the product DB's catalog tables (5-50..5-54)
+  sampledata:
+    build: ./sampledata
+    image: shopapp/sampledata:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/product
+      SPRING_DATASOURCE_USERNAME: sampledata
+      SPRING_DATASOURCE_PASSWORD: ${SAMPLEDATA_DB_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /sampledata/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      sampledata-db-init:
+        condition: service_completed_successfully
+    networks:
+      - shopapp-network
+
   redis:
     image: redis:7.4.12-alpine
     healthcheck:
