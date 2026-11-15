@@ -4,13 +4,14 @@ import com.shopapp.product.model.enumeration.DimensionUnit;
 import com.shopapp.product.viewmodel.ImageVm;
 import com.shopapp.product.viewmodel.category.CategoryGetVm;
 import java.util.List;
+import java.util.Map;
 import lombok.Builder;
 
 /**
  * Back office product detail for the edit form (YAS shape). {@code categories} are view models (id, name, slug,
  * parentId), not the JPA entities YAS serialises.
  */
-@Builder
+@Builder(toBuilder = true)
 public record ProductDetailVm(
     long id,
     String name,
@@ -41,4 +42,12 @@ public record ProductDetailVm(
     List<ImageVm> productImageMedias,
     Long taxClassId,
     Long parentId) {
+
+    /** This detail with its image URLs from a media-service lookup (decisions.md 3b-19). */
+    public ProductDetailVm withImageUrls(Map<Long, String> urls) {
+        return toBuilder()
+            .thumbnailMedia(ImageVm.withUrlFrom(thumbnailMedia, urls))
+            .productImageMedias(productImageMedias.stream().map(image -> image.withUrlFrom(urls)).toList())
+            .build();
+    }
 }

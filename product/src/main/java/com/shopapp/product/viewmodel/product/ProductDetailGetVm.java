@@ -23,4 +23,11 @@ public record ProductDetailGetVm(
     boolean stockAvailable,
     Long stockQuantity
 ) {
+
+    /** This detail with the given image URLs (resolved after the database transaction, decisions.md 3b-19). */
+    public ProductDetailGetVm withImageUrls(String thumbnailUrl, List<String> imageUrls) {
+        return new ProductDetailGetVm(id, name, brandName, productCategories, productAttributeGroups, shortDescription,
+            description, specification, isAllowedToOrder, isPublished, isFeatured, hasOptions, price, thumbnailUrl,
+            imageUrls, stockTrackingEnabled, stockAvailable, stockQuantity);
+    }
 }

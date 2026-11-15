@@ -19,6 +19,7 @@ import com.shopapp.media.PostgresContainerSupport;
 import com.shopapp.media.TestImages;
 import com.shopapp.media.model.Media;
 import com.shopapp.media.repository.MediaRepository;
+import com.shopapp.media.service.MediaService;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMultipartHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -56,6 +58,12 @@ class MediaControllerIT {
 
     @Autowired
     private MediaRepository repository;
+
+    @Autowired
+    private MediaService mediaService;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
 
     @DynamicPropertySource
     static void mediaProperties(DynamicPropertyRegistry registry) {
@@ -147,7 +155,7 @@ class MediaControllerIT {
         mockMvc.perform(upload("../../evil.png", "image/png", TestImages.image("png"))
                 .param("fileNameOverride", "../../../etc/passwd").with(admin()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.fileName").value("passwd"));
+            .andExpect(jsonPath("$.fileName").value("passwd.png"));
         mockMvc.perform(upload("..\\..\\evil.png", "image/png", TestImages.image("png")).with(admin()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.fileName").value("evil.png"));
@@ -171,7 +179,7 @@ class MediaControllerIT {
     void anonymousUpload_isRefused_andNothingStored() throws Exception {
         long before = TestImages.fileCount(MEDIA_DIR);
         mockMvc.perform(upload("a.png", "image/png", TestImages.image("png")))
-            .andExpect(status().is4xxClientError());
+            .andExpect(status().isForbidden());
         assertNothingStored(before);
     }
 
@@ -183,6 +191,31 @@ class MediaControllerIT {
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.detail").value(containsString("JPEG, PNG, GIF")));
         assertNothingStored(before);
+    }
+
+    @Test
+    void hugeDimensions_areBadRequest_andNothingStored() throws Exception {
+        byte[] bomb = TestImages.hugePng(20_000, 20_000);
+        assertThat(bomb.length).isLessThan(200 * 1024);
+        long before = TestImages.fileCount(MEDIA_DIR);
+        mockMvc.perform(upload("bomb.png", "image/png", bomb).with(admin()))
+            .andExpect(status().isBadRequest());
+        assertNothingStored(before);
+    }
+
+    @Test
+    void displayNameExtension_followsDetectedType() throws Exception {
+        mockMvc.perform(upload("promo.html", "text/html", TestImages.image("png")).with(admin()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.fileName").value("promo.png"));
+        mockMvc.perform(upload("photo.jpg", "image/jpeg", TestImages.image("gif")).with(admin()))
+            .andExpect(jsonPath("$.fileName").value("photo.gif"));
+        mockMvc.perform(upload("photo.JPEG", "image/jpeg", TestImages.image("jpg")).with(admin()))
+            .andExpect(jsonPath("$.fileName").value("photo.JPEG"));
+        mockMvc.perform(upload("scan.jpg", "image/jpeg", TestImages.image("jpg")).with(admin()))
+            .andExpect(jsonPath("$.fileName").value("scan.jpg"));
+        mockMvc.perform(upload("noextension", "image/png", TestImages.image("png")).with(admin()))
+            .andExpect(jsonPath("$.fileName").value("noextension.png"));
     }
 
     @Test
@@ -302,6 +335,21 @@ class MediaControllerIT {
             .andExpect(status().isNotFound());
         mockMvc.perform(delete("/medias/{id}", id).with(admin()))
             .andExpect(status().isNotFound());
+    }
+
+    /** The file is deleted only after the row's deletion commits: a rollback keeps both (decisions.md 3b-21). */
+    @Test
+    void delete_rolledBack_keepsRowAndFile() throws Exception {
+        long id = uploadPng("red.png");
+        Path stored = MEDIA_DIR.resolve(repository.findById(id).orElseThrow().getFilePath());
+
+        transactionTemplate.executeWithoutResult(status -> {
+            mediaService.removeMedia(id);
+            status.setRollbackOnly();
+        });
+
+        assertThat(repository.existsById(id)).isTrue();
+        assertThat(Files.exists(stored)).isTrue();
     }
 
     @Test

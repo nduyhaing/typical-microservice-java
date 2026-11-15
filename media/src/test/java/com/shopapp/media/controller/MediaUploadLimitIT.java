@@ -92,6 +92,17 @@ class MediaUploadLimitIT {
         assertThat(response.body()).contains("\"mediaType\":\"image/png\"");
     }
 
+    /** A file of exactly 10 MB plus the multipart overhead still fits the request limit (decisions.md 3b-23). */
+    @Test
+    void fileOfExactlyTenMegabytes_isAccepted() throws Exception {
+        byte[] png = TestImages.image("png");
+        byte[] tenMegabytes = java.util.Arrays.copyOf(png, 10 * 1024 * 1024);
+
+        HttpResponse<String> response = upload(tenMegabytes);
+
+        assertThat(response.statusCode()).isEqualTo(200);
+    }
+
     @Test
     void fileOverTenMegabytes_isRejectedByTheMultipartLimit_andNothingStored() throws Exception {
         long rowsBefore = repository.count();

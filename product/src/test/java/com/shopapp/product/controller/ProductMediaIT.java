@@ -14,6 +14,7 @@ import com.shopapp.product.model.ProductImage;
 import com.shopapp.product.repository.ProductImageRepository;
 import com.shopapp.product.support.AbstractStorefrontIT;
 import com.shopapp.product.support.MediaStub;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -139,11 +140,32 @@ class ProductMediaIT extends AbstractStorefrontIT {
                 MediaStub.urlOf(101), MediaStub.urlOf(102))));
         assertOneListCall(101L, 102L);
 
-        MEDIA.reset();
+    }
+
+    /** The order service's price lookup needs no images: it never waits for the media service (3b-18). */
+    @Test
+    void checkoutList_makesNoMediaCall() throws Exception {
+        Product a = withThumbnail("A", 101);
+        Product b = withThumbnail("B", 102);
+
         mockMvc.perform(get("/products").param("ids", a.getId() + "," + b.getId()).with(jwt()))
-            .andExpect(jsonPath("$.productCheckoutListVms[*].thumbnailUrl").value(containsInAnyOrder(
-                MediaStub.urlOf(101), MediaStub.urlOf(102))));
-        assertOneListCall(101L, 102L);
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.productCheckoutListVms[*].price").value(containsInAnyOrder(10.0, 10.0)))
+            .andExpect(jsonPath("$.productCheckoutListVms[*].thumbnailUrl").value(containsInAnyOrder("", "")));
+        assertThat(MEDIA.requests()).isEmpty();
+    }
+
+    /** A hanging media service costs at most its short read timeout (1.5 s), well below callers' 5 s (3b-18). */
+    @Test
+    void slowMedia_listAnswersWithinTwoSecondsWithEmptyUrl() throws Exception {
+        withThumbnail("A", 101);
+        MEDIA.delay(Duration.ofSeconds(4));
+
+        long start = System.nanoTime();
+        mockMvc.perform(get("/storefront/products/featured"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.productList[0].thumbnailUrl").value(""));
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofMillis(2000));
     }
 
     @Test

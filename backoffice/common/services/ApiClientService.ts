@@ -31,6 +31,9 @@ function parseBody(text: string): unknown {
   }
 }
 
+/** What nginx answers (as HTML) when a request body exceeds client_max_body_size (decisions.md 3b-23). */
+export const TOO_LARGE_MESSAGE = 'File is too large (max 10 MB)';
+
 async function request<T>(method: string, path: string, payload?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   const init: RequestInit = { method, headers };
@@ -44,6 +47,9 @@ async function request<T>(method: string, path: string, payload?: unknown): Prom
   const response = await fetch(`${apiBaseUrl()}${path}`, init);
   const body = parseBody(await response.text());
   if (!response.ok) {
+    if (response.status === 413 && (body === null || typeof body !== 'object')) {
+      throw new ApiError(413, { detail: TOO_LARGE_MESSAGE, fieldErrors: [] });
+    }
     throw new ApiError(response.status, body);
   }
   return body as T;

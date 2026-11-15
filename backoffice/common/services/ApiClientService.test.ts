@@ -1,5 +1,6 @@
 import { afterEach, vi } from 'vitest';
-import { ApiError, apiBaseUrl, del, get, post, put } from './ApiClientService';
+import { ApiError, apiBaseUrl, del, get, post, postForm, put } from './ApiClientService';
+import { toErrorInfo } from './errors';
 
 const okJson = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -92,3 +93,24 @@ describe('write methods', () => {
   });
 });
 
+
+describe('413 from nginx', () => {
+  it('turns a non-JSON 413 (nginx HTML page) into a clear "too large" message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('<html><h1>413 Request Entity Too Large</h1></html>', { status: 413 }))
+    );
+
+    const error = await postForm('/media/medias', new FormData()).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(413);
+    expect(toErrorInfo(error).message).toBe('File is too large (max 10 MB)');
+  });
+
+  it('keeps a JSON 413 body as it is', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"Too big"}', { status: 413 })));
+
+    const error = await postForm('/media/medias', new FormData()).catch((e: unknown) => e);
+    expect(toErrorInfo(error).message).toBe('Too big');
+  });
+});

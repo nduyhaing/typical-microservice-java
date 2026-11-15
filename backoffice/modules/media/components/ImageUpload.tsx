@@ -1,4 +1,5 @@
 import { ChangeEvent, useState } from 'react';
+import Alert from 'react-bootstrap/Alert';
 import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import ErrorMessage from '../../../common/components/ErrorMessage';
@@ -15,12 +16,31 @@ type Props = {
   onChange: (images: UploadedImage[]) => void;
 };
 
-const ACCEPT = 'image/png,image/jpeg,image/gif';
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/gif'];
+const ACCEPT = ALLOWED_TYPES.join(',');
+/** The media service's per-file limit (nginx allows 11 MB for the whole request, decisions.md 3b-23). */
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-/** Image upload with previews and remove buttons; uploads go to the media service as soon as files are chosen. */
+/** Why a chosen file cannot be uploaded, or undefined when it may be sent (the service still checks the content). */
+export function fileProblem(file: File): string | undefined {
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    return `${file.name} is not a PNG, JPEG or GIF image.`;
+  }
+  if (file.size > MAX_FILE_BYTES) {
+    return `${file.name} is too large (max 10 MB).`;
+  }
+  return undefined;
+}
+
+/**
+ * Image upload with previews and remove buttons; uploads go to the media service as soon as files are chosen. Files
+ * that are too large or not PNG/JPEG/GIF are refused before upload. Remove is disabled while uploading, so the
+ * images list an upload appends to cannot be stale.
+ */
 export default function ImageUpload({ id, label, images, multiple = false, onChange }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<unknown>();
+  const [problem, setProblem] = useState<string>();
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const input = event.target;
@@ -29,10 +49,17 @@ export default function ImageUpload({ id, label, images, multiple = false, onCha
       return;
     }
     setError(undefined);
+    const chosen = multiple ? files : files.slice(0, 1);
+    const refused = chosen.map(fileProblem).find((p) => p !== undefined);
+    setProblem(refused);
+    if (refused !== undefined) {
+      input.value = '';
+      return;
+    }
     setUploading(true);
     const uploaded: UploadedImage[] = [];
     try {
-      for (const file of multiple ? files : files.slice(0, 1)) {
+      for (const file of chosen) {
         uploaded.push(await uploadImage(file));
       }
     } catch (e) {
@@ -49,6 +76,11 @@ export default function ImageUpload({ id, label, images, multiple = false, onCha
   return (
     <Form.Group className="mb-3" controlId={id}>
       <Form.Label>{label}</Form.Label>
+      {problem !== undefined && (
+        <Alert variant="danger" role="alert">
+          {problem}
+        </Alert>
+      )}
       {error !== undefined && <ErrorMessage error={error} />}
       <div className="d-flex flex-wrap gap-2 mb-2">
         {images.map((image) => (
@@ -66,6 +98,7 @@ export default function ImageUpload({ id, label, images, multiple = false, onCha
               variant="outline-danger"
               className="mt-1"
               aria-label={`Remove image ${image.id}`}
+              disabled={uploading}
               onClick={() => onChange(images.filter((i) => i.id !== image.id))}
             >
               Remove

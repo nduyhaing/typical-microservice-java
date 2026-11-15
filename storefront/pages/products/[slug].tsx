@@ -46,7 +46,8 @@ export const getServerSideProps: GetServerSideProps<Props> = async ({ params }) 
 export default function ProductPage({ product, options, variations }: Props) {
   return (
     <Layout title={product.name}>
-      <ProductDetails product={product} options={options} variations={variations} />
+      {/* keyed by product: client-side navigation to another product starts with fresh gallery/option/quantity state */}
+      <ProductDetails key={product.id} product={product} options={options} variations={variations} />
       <RelatedProducts productId={product.id} />
     </Layout>
   );

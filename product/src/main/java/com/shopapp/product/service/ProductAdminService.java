@@ -56,11 +56,11 @@ import org.springframework.util.StringUtils;
 
 /**
  * Back office product management, ported from YAS ProductService (create/update/delete, list, detail, variations).
- * Differences from YAS are listed in decisions.md 3a-15 .. 3a-19.
+ * Differences from YAS are listed in decisions.md 3a-15 .. 3a-19. Image URLs are resolved after the read-only
+ * transaction (3b-19).
  */
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class ProductAdminService {
 
     private final ProductRepository productRepository;
@@ -73,8 +73,9 @@ public class ProductAdminService {
     private final ProductOptionCombinationRepository productOptionCombinationRepository;
     private final ProductRelatedRepository productRelatedRepository;
     private final ProductDetailService productDetailService;
-    private final MediaService mediaService;
+    private final MediaUrlResolver mediaUrlResolver;
 
+    @Transactional(readOnly = true)
     public ProductListGetVm getProducts(int pageNo, int pageSize, String productName, String brandName) {
         Page<Product> page = productRepository.findForBackoffice(productName.trim().toLowerCase(Locale.ROOT),
             brandName.trim(), PageRequest.of(pageNo, pageSize));
@@ -88,15 +89,22 @@ public class ProductAdminService {
     }
 
     public ProductDetailVm getProduct(long id) {
-        Product product = findEditableProduct(id);
+        return mediaUrlResolver.readThenResolve(() -> {
+            Product product = findEditableProduct(id);
+            ProductDetailVm detail = toDetailVm(product);
+            return new WithMedia<>(ProductDetailService.imageIds(List.of(product)), detail::withImageUrls);
+        });
+    }
+
+    /** The edit-form detail with empty image URLs, filled in after the transaction. */
+    private static ProductDetailVm toDetailVm(Product product) {
         List<CategoryGetVm> categories = product.getProductCategories().stream()
             .map(ProductCategory::getCategory)
             .map(category -> new CategoryGetVm(category.getId(), category.getName(), category.getSlug(),
                 category.getParent() == null ? -1 : category.getParent().getId(), null))
             .toList();
-        Map<Long, String> urls = mediaService.getMediaUrls(ProductDetailService.imageIds(List.of(product)));
         List<ImageVm> images = product.getProductImages().stream()
-            .map(image -> new ImageVm(image.getImageId(), MediaService.urlOf(urls, image.getImageId())))
+            .map(image -> new ImageVm(image.getImageId(), ""))
             .toList();
         Long thumbnailId = product.getThumbnailMediaId();
         return ProductDetailVm.builder()
@@ -125,8 +133,7 @@ public class ProductAdminService {
             .metaTitle(product.getMetaTitle())
             .metaKeyword(product.getMetaKeyword())
             .metaDescription(product.getMetaDescription())
-            .thumbnailMedia(thumbnailId == null ? null
-                : new ImageVm(thumbnailId, MediaService.urlOf(urls, thumbnailId)))
+            .thumbnailMedia(thumbnailId == null ? null : new ImageVm(thumbnailId, ""))
             .productImageMedias(images)
             .taxClassId(product.getTaxClassId())
             .parentId(product.getParent() == null ? null : product.getParent().getId())
@@ -137,6 +144,7 @@ public class ProductAdminService {
      * YAS GET /backoffice/products/related-products/{id}: all related products, published or not, so the back office
      * can keep them when it saves a product (an update replaces the related list, decisions.md 3a-19, 3a-30).
      */
+    @Transactional(readOnly = true)
     public List<ProductListVm> getRelatedProducts(Long id) {
         Product product = productRepository.findById(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
@@ -147,12 +155,14 @@ public class ProductAdminService {
 
     /** The parent's variations that were not deleted, whether or not the parent is published. */
     public List<ProductVariationGetVm> getVariations(Long parentId) {
-        Product parent = findProduct(parentId);
-        if (!parent.isHasOptions()) {
-            return List.of();
-        }
-        return productDetailService.toVariationVms(
-            parent.getProducts().stream().filter(Product::isPublished).toList());
+        return mediaUrlResolver.readThenResolve(() -> {
+            Product parent = findProduct(parentId);
+            if (!parent.isHasOptions()) {
+                return WithMedia.of(List.<ProductVariationGetVm>of());
+            }
+            return productDetailService.variationVms(
+                parent.getProducts().stream().filter(Product::isPublished).toList());
+        });
     }
 
     @Transactional

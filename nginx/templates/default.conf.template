@@ -41,8 +41,8 @@ server {
     listen ${NGINX_HTTP_PORT};
     server_name api.${DOMAIN};
 
-    # media uploads (the media service also limits files to 10 MB)
-    client_max_body_size 10m;
+    # media uploads: a 10 MB file plus its multipart overhead; the media service enforces 10 MB per file (3b-23)
+    client_max_body_size 11m;
 
     location /product/ {
         set $upstream_product product:8080;
@@ -191,8 +191,8 @@ server {
 server {
     listen ${NGINX_HTTP_PORT};
     server_name backoffice.${DOMAIN};
-    # back-office image uploads go through this host (3b-15); same limit as the api host.
-    client_max_body_size 10m;
+    # back-office image uploads go through this host (3b-15); same limit as the api host (3b-23).
+    client_max_body_size 11m;
 
     location / {
         set $upstream_backoffice_bff backoffice-bff:8088;

@@ -28,11 +28,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Storefront product listings (ported from YAS ProductService).
+ * Storefront product listings (ported from YAS ProductService). Each listing reads its page in a read-only
+ * transaction and resolves the thumbnail URLs after it, with one media-service call (decisions.md 3b-10, 3b-19).
  */
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class ProductService {
 
     private final ProductRepository productRepository;
@@ -40,43 +40,50 @@ public class ProductService {
     private final BrandRepository brandRepository;
     private final ProductCategoryRepository productCategoryRepository;
     private final ProductRelatedRepository productRelatedRepository;
-    private final MediaService mediaService;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public ProductFeatureGetVm getListFeaturedProducts(int pageNo, int pageSize) {
-        Page<Product> productPage = productRepository.getFeaturedProduct(PageRequest.of(pageNo, pageSize));
-        Map<Long, String> urls = thumbnailUrls(productPage.getContent());
-        return new ProductFeatureGetVm(productPage.map(product -> toThumbnailGetVm(product, urls)).getContent(),
-            productPage.getTotalPages());
+        return mediaUrlResolver.readThenResolve(() -> {
+            Page<Product> productPage = productRepository.getFeaturedProduct(PageRequest.of(pageNo, pageSize));
+            List<Card> cards = Card.of(productPage.getContent());
+            int totalPages = productPage.getTotalPages();
+            return new WithMedia<>(Card.mediaIds(cards),
+                urls -> new ProductFeatureGetVm(Card.toGetVms(cards, urls), totalPages));
+        });
     }
 
     public ProductsGetVm getProductsByMultiQuery(int pageNo, int pageSize, String productName, String categorySlug,
                                                  Double startPrice, Double endPrice) {
-        Page<Product> productPage = productRepository.findByProductNameAndCategorySlugAndPriceBetween(
-            productName.trim().toLowerCase(), categorySlug.trim(), startPrice, endPrice,
-            PageRequest.of(pageNo, pageSize));
-        Map<Long, String> urls = thumbnailUrls(productPage.getContent());
-        return toProductsGetVm(productPage.map(product -> toThumbnailGetVm(product, urls)));
+        return mediaUrlResolver.readThenResolve(() -> {
+            Page<Product> productPage = productRepository.findByProductNameAndCategorySlugAndPriceBetween(
+                productName.trim().toLowerCase(), categorySlug.trim(), startPrice, endPrice,
+                PageRequest.of(pageNo, pageSize));
+            return productsGetVm(productPage, productPage.getContent());
+        });
     }
 
     public ProductListGetFromCategoryVm getProductsFromCategory(int pageNo, int pageSize, String categorySlug) {
-        Category category = categoryRepository.findBySlug(categorySlug)
-            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CATEGORY_NOT_FOUND, categorySlug));
-        Page<Product> products = productCategoryRepository
-            .findStorefrontByCategory(category, PageRequest.of(pageNo, pageSize))
-            .map(ProductCategory::getProduct);
-        Map<Long, String> urls = thumbnailUrls(products.getContent());
-        Page<ProductThumbnailVm> page = products.map(product -> toThumbnailVm(product, urls));
-        return new ProductListGetFromCategoryVm(page.getContent(), page.getNumber(), page.getSize(),
-            (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
+        return mediaUrlResolver.readThenResolve(() -> {
+            Category category = categoryRepository.findBySlug(categorySlug)
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CATEGORY_NOT_FOUND, categorySlug));
+            Page<Product> page = productCategoryRepository
+                .findStorefrontByCategory(category, PageRequest.of(pageNo, pageSize))
+                .map(ProductCategory::getProduct);
+            List<Card> cards = Card.of(page.getContent());
+            return new WithMedia<>(Card.mediaIds(cards), urls -> new ProductListGetFromCategoryVm(
+                Card.toVms(cards, urls), page.getNumber(), page.getSize(), (int) page.getTotalElements(),
+                page.getTotalPages(), page.isLast()));
+        });
     }
 
     public List<ProductThumbnailVm> getProductsByBrand(String brandSlug) {
-        Brand brand = brandRepository.findBySlug(brandSlug)
-            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.BRAND_NOT_FOUND, brandSlug));
-        List<Product> products =
-            productRepository.findAllByBrandAndIsPublishedTrueAndIsVisibleIndividuallyTrueOrderByIdAsc(brand);
-        Map<Long, String> urls = thumbnailUrls(products);
-        return products.stream().map(product -> toThumbnailVm(product, urls)).toList();
+        return mediaUrlResolver.readThenResolve(() -> {
+            Brand brand = brandRepository.findBySlug(brandSlug)
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.BRAND_NOT_FOUND, brandSlug));
+            List<Card> cards = Card.of(
+                productRepository.findAllByBrandAndIsPublishedTrueAndIsVisibleIndividuallyTrueOrderByIdAsc(brand));
+            return new WithMedia<>(Card.mediaIds(cards), urls -> Card.toVms(cards, urls));
+        });
     }
 
     /**
@@ -84,54 +91,70 @@ public class ProductService {
      * unpublished parent, are left out (decisions.md 3a-33).
      */
     public List<ProductThumbnailGetVm> getFeaturedProductsById(List<Long> productIds) {
-        List<Product> products = productRepository.findStorefrontByIds(productIds);
-        Map<Long, String> urls = thumbnailUrls(products);
-        return products.stream().map(product -> toThumbnailGetVm(product, urls)).toList();
+        return mediaUrlResolver.readThenResolve(() -> {
+            List<Card> cards = Card.of(productRepository.findStorefrontByIds(productIds));
+            return new WithMedia<>(Card.mediaIds(cards), urls -> Card.toGetVms(cards, urls));
+        });
     }
 
-    /** YAS GET /products: the order service's price lookup at checkout, orderable products only. */
+    /**
+     * YAS GET /products: the order service's price lookup at checkout, orderable products only. It answers without
+     * calling the media service: the order service reads only id, name and price, so {@code thumbnailUrl} stays
+     * empty and checkout never waits for images (decisions.md 3b-18).
+     */
+    @Transactional(readOnly = true)
     public ProductGetCheckoutListVm getProductCheckoutList(int pageNo, int pageSize, List<Long> productIds) {
         Page<Product> page = productRepository.findOrderableByIds(productIds, PageRequest.of(pageNo, pageSize));
-        Map<Long, String> urls = thumbnailUrls(page.getContent());
         return new ProductGetCheckoutListVm(
-            page.map(product -> ProductCheckoutListVm.fromModel(product,
-                MediaService.urlOf(urls, product.getThumbnailMediaId()))).getContent(),
+            page.map(product -> ProductCheckoutListVm.fromModel(product, "")).getContent(),
             page.getNumber(), page.getSize(), (int) page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
     public ProductsGetVm getRelatedProductsStorefront(Long id, int pageNo, int pageSize) {
-        Product product = productRepository.findStorefrontById(id)
-            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
-        Page<ProductRelated> relatedPage = productRelatedRepository.findStorefrontRelated(product,
-            PageRequest.of(pageNo, pageSize));
-        List<Product> relatedProducts = relatedPage.stream().map(ProductRelated::getRelatedProduct).toList();
-        Map<Long, String> urls = thumbnailUrls(relatedProducts);
-        List<ProductThumbnailGetVm> related = relatedProducts.stream()
-            .map(relatedProduct -> toThumbnailGetVm(relatedProduct, urls))
-            .toList();
-        return new ProductsGetVm(related, relatedPage.getNumber(), relatedPage.getSize(),
-            (int) relatedPage.getTotalElements(), relatedPage.getTotalPages(), relatedPage.isLast());
+        return mediaUrlResolver.readThenResolve(() -> {
+            Product product = productRepository.findStorefrontById(id)
+                .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
+            Page<ProductRelated> relatedPage = productRelatedRepository.findStorefrontRelated(product,
+                PageRequest.of(pageNo, pageSize));
+            return productsGetVm(relatedPage, relatedPage.stream().map(ProductRelated::getRelatedProduct).toList());
+        });
     }
 
-    private ProductsGetVm toProductsGetVm(Page<ProductThumbnailGetVm> page) {
-        return new ProductsGetVm(page.getContent(), page.getNumber(), page.getSize(), (int) page.getTotalElements(),
-            page.getTotalPages(), page.isLast());
+    private static WithMedia<ProductsGetVm> productsGetVm(Page<?> page, List<Product> products) {
+        List<Card> cards = Card.of(products);
+        int number = page.getNumber();
+        int size = page.getSize();
+        int totalElements = (int) page.getTotalElements();
+        int totalPages = page.getTotalPages();
+        boolean last = page.isLast();
+        return new WithMedia<>(Card.mediaIds(cards), urls -> new ProductsGetVm(Card.toGetVms(cards, urls), number,
+            size, totalElements, totalPages, last));
     }
 
-    private ProductThumbnailGetVm toThumbnailGetVm(Product product, Map<Long, String> urls) {
-        return new ProductThumbnailGetVm(product.getId(), product.getName(), product.getSlug(),
-            MediaService.urlOf(urls, product.getThumbnailMediaId()), product.getPrice(),
-            product.isStockTrackingEnabled(), product.stockAvailable(), product.trackedStockQuantity());
-    }
+    /** The plain values of a product card, read inside the transaction; the URL is filled in after it. */
+    private record Card(long id, String name, String slug, Long thumbnailMediaId, Double price,
+                        boolean stockTrackingEnabled, boolean stockAvailable, Long stockQuantity) {
 
-    private ProductThumbnailVm toThumbnailVm(Product product, Map<Long, String> urls) {
-        return new ProductThumbnailVm(product.getId(), product.getName(), product.getSlug(),
-            MediaService.urlOf(urls, product.getThumbnailMediaId()),
-            product.isStockTrackingEnabled(), product.stockAvailable(), product.trackedStockQuantity());
-    }
+        static List<Card> of(List<Product> products) {
+            return products.stream().map(product -> new Card(product.getId(), product.getName(), product.getSlug(),
+                product.getThumbnailMediaId(), product.getPrice(), product.isStockTrackingEnabled(),
+                product.stockAvailable(), product.trackedStockQuantity())).toList();
+        }
 
-    /** Thumbnail URLs of a page of products with one media-service call (decisions.md 3b-10). */
-    private Map<Long, String> thumbnailUrls(List<Product> products) {
-        return mediaService.getMediaUrls(products.stream().map(Product::getThumbnailMediaId).toList());
+        static List<Long> mediaIds(List<Card> cards) {
+            return cards.stream().map(Card::thumbnailMediaId).toList();
+        }
+
+        static List<ProductThumbnailGetVm> toGetVms(List<Card> cards, Map<Long, String> urls) {
+            return cards.stream().map(card -> new ProductThumbnailGetVm(card.id, card.name, card.slug,
+                MediaService.urlOf(urls, card.thumbnailMediaId), card.price, card.stockTrackingEnabled,
+                card.stockAvailable, card.stockQuantity)).toList();
+        }
+
+        static List<ProductThumbnailVm> toVms(List<Card> cards, Map<Long, String> urls) {
+            return cards.stream().map(card -> new ProductThumbnailVm(card.id, card.name, card.slug,
+                MediaService.urlOf(urls, card.thumbnailMediaId), card.stockTrackingEnabled, card.stockAvailable,
+                card.stockQuantity)).toList();
+        }
     }
 }

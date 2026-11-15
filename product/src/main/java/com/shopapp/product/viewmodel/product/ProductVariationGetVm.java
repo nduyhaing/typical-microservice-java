@@ -15,4 +15,10 @@ public record ProductVariationGetVm(
     List<ImageVm> productImages,
     Map<Long, String> options
 ) {
+
+    /** This variation with its image URLs from a media-service lookup (decisions.md 3b-19). */
+    public ProductVariationGetVm withImageUrls(Map<Long, String> urls) {
+        return new ProductVariationGetVm(id, name, slug, sku, gtin, price, ImageVm.withUrlFrom(thumbnail, urls),
+            productImages.stream().map(image -> image.withUrlFrom(urls)).toList(), options);
+    }
 }

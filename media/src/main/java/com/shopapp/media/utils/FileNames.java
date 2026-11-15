@@ -1,5 +1,8 @@
 package com.shopapp.media.utils;
 
+import java.util.Locale;
+import java.util.Set;
+
 /**
  * Display file names: the part after the last path separator, characters other than letters, digits, '.', '-'
  * and '_' replaced by '_', no leading dots, at most 100 characters. The result is safe in a URL path segment and
@@ -30,5 +33,27 @@ public final class FileNames {
         }
         safe = safe.replaceFirst("^\\.+", "");
         return safe.isEmpty() ? DEFAULT_NAME : safe;
+    }
+
+    /**
+     * {@code name} (already sanitized) with an extension matching the detected type: kept when it is one of
+     * {@code allowedExtensions} (any case), otherwise replaced or added ({@code promo.html} stored as a PNG is shown as
+     * {@code promo.png}, decisions.md 3b-20).
+     */
+    public static String withExtension(String name, Set<String> allowedExtensions, String extension) {
+        int dot = name.lastIndexOf('.');
+        String current = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+        if (allowedExtensions.contains(current)) {
+            return name;
+        }
+        String base = dot < 0 ? name : name.substring(0, dot);
+        if (base.isEmpty()) {
+            base = DEFAULT_NAME;
+        }
+        int maxBase = MAX_LENGTH - extension.length() - 1;
+        if (base.length() > maxBase) {
+            base = base.substring(0, maxBase);
+        }
+        return base + "." + extension;
     }
 }

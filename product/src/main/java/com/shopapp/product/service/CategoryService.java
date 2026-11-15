@@ -11,30 +11,39 @@ import com.shopapp.product.viewmodel.ImageVm;
 import com.shopapp.product.viewmodel.category.CategoryGetDetailVm;
 import com.shopapp.product.viewmodel.category.CategoryGetVm;
 import com.shopapp.product.viewmodel.category.CategoryPostVm;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/** Categories; image URLs are resolved after the read-only transaction (decisions.md 3b-19). */
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
     private final ProductCategoryRepository productCategoryRepository;
-    private final MediaService mediaService;
+    private final MediaUrlResolver mediaUrlResolver;
 
     public List<CategoryGetVm> getCategories(String categoryName) {
-        List<Category> categories = categoryRepository.findByNameContainingIgnoreCase(categoryName);
-        Map<Long, String> urls = mediaService.getMediaUrls(categories.stream().map(Category::getImageId).toList());
-        return categories.stream().map(category -> toVm(category, urls)).toList();
+        return mediaUrlResolver.readThenResolve(() -> {
+            List<CategoryGetVm> categories = categoryRepository.findByNameContainingIgnoreCase(categoryName).stream()
+                .map(CategoryService::toVm)
+                .toList();
+            return new WithMedia<>(categories.stream().map(CategoryService::imageId).toList(),
+                urls -> categories.stream().map(category -> category.withImageUrl(urls)).toList());
+        });
     }
 
     public CategoryGetDetailVm getCategoryById(Long id) {
-        Category category = findCategory(id);
-        return CategoryGetDetailVm.fromModel(category, image(category));
+        return mediaUrlResolver.readThenResolve(() -> {
+            Category category = findCategory(id);
+            Long imageId = category.getImageId();
+            CategoryGetDetailVm detail = CategoryGetDetailVm.fromModel(category,
+                imageId == null ? null : new ImageVm(imageId, ""));
+            return new WithMedia<>(Collections.singletonList(imageId), detail::withImageUrl);
+        });
     }
 
     @Transactional
@@ -124,16 +133,16 @@ public class CategoryService {
         }
     }
 
-    private ImageVm image(Category category) {
-        return category.getImageId() == null ? null
-            : new ImageVm(category.getImageId(), mediaService.getMedia(category.getImageId()).url());
+    private static Long imageId(CategoryGetVm category) {
+        return category.categoryImage() == null ? null : category.categoryImage().id();
     }
 
-    private CategoryGetVm toVm(Category category, Map<Long, String> urls) {
+    /** A category view model whose image URL is empty until resolved. */
+    private static CategoryGetVm toVm(Category category) {
         Category parent = category.getParent();
         long parentId = parent == null ? -1 : parent.getId();
         Long imageId = category.getImageId();
-        ImageVm image = imageId == null ? null : new ImageVm(imageId, MediaService.urlOf(urls, imageId));
+        ImageVm image = imageId == null ? null : new ImageVm(imageId, "");
         return new CategoryGetVm(category.getId(), category.getName(), category.getSlug(), parentId, image);
     }
 }

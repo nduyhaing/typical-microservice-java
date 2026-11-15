@@ -328,7 +328,8 @@ EOF
 
 # Slice 3b: media upload through backoffice-bff, product thumbnail from the media service on the storefront page.
 check_media() {
-    local base origin media_id status customer_token product_id detail related original_thumb media_url headers
+    local base origin media_id status customer_token product_id detail related original_thumb media_url headers big_id
+    local media_in_use
     base=$(url backoffice "")
     origin="http://backoffice.${DOMAIN}${BASE_URL_SUFFIX}"
     if [ "$(backoffice_auth_status "$ADMIN_JAR" "$base" || true)" != "200" ] \
@@ -348,6 +349,18 @@ check_media() {
     status=$(echo 'not an image' | curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" \
         -F 'multipartFile=@-;filename=fake.png;type=image/png' "$(url backoffice /api/media/medias)" || true)
     if [ "$status" = "400" ]; then pass "a text file named .png is refused (400)"; else fail "text file named .png -> $status"; fi
+    # a file of exactly 10 MB passes nginx (client_max_body_size 11m) and the media service (3b-23)
+    big_id=$(smoke_png | python -c "import sys;d=sys.stdin.buffer.read();sys.stdout.buffer.write(d.ljust(10*1024*1024,b'\0'))" \
+        | curl -s -b "$ADMIN_JAR" -H "Origin: $origin" -F 'multipartFile=@-;filename=ten-mb.png;type=image/png' \
+            "$(url backoffice /api/media/medias)" \
+        | python -c "import json,sys;print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+    if [ -n "$big_id" ]; then
+        pass "a 10 MB PNG uploads through the back office"
+        curl -s -o /dev/null -b "$ADMIN_JAR" -H "Origin: $origin" -X DELETE \
+            "$(url backoffice "/api/media/medias/$big_id")" || true
+    else
+        fail "a 10 MB PNG upload through the back office was refused"
+    fi
     customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
         "$(url identity /realms/shopapp/protocol/openid-connect/token)" \
         | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])" || true)
@@ -368,6 +381,8 @@ check_media() {
     related=$(curl -s -b "$ADMIN_JAR" "$(url backoffice "/api/product/backoffice/products/related-products/$product_id")" || true)
     original_thumb=$(python -c "import json,sys;t=json.load(sys.stdin).get('thumbnailMedia');print(t['id'] if t else '')" \
         <<< "$detail" 2>/dev/null || echo invalid)
+    # the media may only be deleted once no product points at it any more (3b review M-10)
+    media_in_use=no
     if [ "$original_thumb" = "invalid" ] || ! python -c "import json,sys;json.load(sys.stdin)" <<< "$related" 2>/dev/null; then
         fail "read the Galaxy A55 admin detail"
     else
@@ -388,7 +403,16 @@ check_media() {
         status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X PUT \
             -H 'Content-Type: application/json' -d "$(product_put_body "$detail" "$related" "$original_thumb")" \
             "$(url backoffice "/api/product/backoffice/products/$product_id")" || true)
-        if [ "$status" = "204" ]; then pass "restore the Galaxy A55 thumbnail"; else fail "restore thumbnail -> $status"; fi
+        if [ "$status" = "204" ]; then
+            pass "restore the Galaxy A55 thumbnail"
+        else
+            fail "restore thumbnail -> $status"
+            media_in_use=yes
+        fi
+    fi
+    if [ "$media_in_use" = "yes" ]; then
+        fail "uploaded media $media_id kept: Galaxy A55 may still use it as its thumbnail (restore it by hand)"
+        return
     fi
     status=$(curl -s -o /dev/null -w '%{http_code}' -b "$ADMIN_JAR" -H "Origin: $origin" -X DELETE \
         "$(url backoffice "/api/media/medias/$media_id")" || true)

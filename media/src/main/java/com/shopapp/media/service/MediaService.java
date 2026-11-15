@@ -22,6 +22,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
@@ -53,8 +55,10 @@ public class MediaService {
         ImageType type = ImageTypeDetector.detect(content)
             .orElseThrow(() -> new BadRequestException(INVALID_FILE_TYPE));
 
-        String displayName = FileNames.sanitize(StringUtils.hasText(mediaPostVm.fileNameOverride())
-            ? mediaPostVm.fileNameOverride() : file.getOriginalFilename());
+        String displayName = FileNames.withExtension(FileNames.sanitize(
+            StringUtils.hasText(mediaPostVm.fileNameOverride())
+                ? mediaPostVm.fileNameOverride() : file.getOriginalFilename()),
+            type.extensions(), type.extension());
         String storedName = fileSystemRepository.persistFile(UUID.randomUUID() + "." + type.extension(), content);
 
         Media media = new Media();
@@ -72,7 +76,8 @@ public class MediaService {
     }
 
     /**
-     * Deletes the row, then the file.
+     * Deletes the row, then, once that has committed, the file: a failed or rolled-back commit never leaves a row
+     * without its file (an orphan file is the lesser harm, decisions.md 3b-21).
      */
     @Transactional
     public void removeMedia(Long id) {
@@ -80,11 +85,17 @@ public class MediaService {
             .orElseThrow(() -> new NotFoundException(String.format(MEDIA_NOT_FOUND, id)));
         mediaRepository.delete(media);
         mediaRepository.flush();
-        try {
-            fileSystemRepository.deleteFile(media.getFilePath());
-        } catch (RuntimeException ex) {
-            log.warn("Media {} deleted but its file {} could not be removed", id, media.getFilePath(), ex);
-        }
+        String filePath = media.getFilePath();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    fileSystemRepository.deleteFile(filePath);
+                } catch (RuntimeException ex) {
+                    log.warn("Media {} deleted but its file {} could not be removed", id, filePath, ex);
+                }
+            }
+        });
     }
 
     public MediaVm getMediaById(Long id) {
