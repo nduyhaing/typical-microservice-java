@@ -5,9 +5,9 @@
 #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d
 #
 # and off again with a plain `docker compose up -d` (the services are recreated without the OTLP endpoint, so they
-# stop exporting) followed by
+# stop exporting) followed by (volumes are kept)
 #
-#   docker compose -f docker-compose.yml -f docker-compose.observability.yml stop otel-collector prometheus loki \
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml rm -sf otel-collector prometheus loki \
 #     tempo grafana kafka-exporter
 #
 # Grafana: http://grafana.${DOMAIN} (hosts entry needed, see README). No other port is published.
