@@ -11,6 +11,7 @@ export type OrderItem = {
   productName: string;
   quantity: number;
   productPrice: number;
+  discountAmount?: number;
   taxPercent?: number;
   taxAmount?: number;
 };
@@ -24,7 +25,8 @@ export type Order = {
   subtotal?: number;
   tax?: number;
   discount?: number;
-  /** subtotal + tax - discount, computed by the server */
+  couponCode?: string | null;
+  /** subtotal - discount + tax, computed by the server */
   totalPrice: number;
   orderStatus: string;
   paymentStatus: string;
@@ -38,6 +40,8 @@ export type OrderPost = AddressChoice & {
   checkoutId: string;
   note?: string;
   paymentMethod: 'COD';
+  /** a coupon the customer applied; the server verifies it and computes the discount (decisions.md 4-50) */
+  couponCode?: string;
 };
 
 export type OrderPreviewItem = {
@@ -46,6 +50,7 @@ export type OrderPreviewItem = {
   quantity: number;
   productPrice: number;
   subtotal: number;
+  discountAmount?: number;
   taxPercent: number;
   taxAmount: number;
 };
@@ -58,6 +63,8 @@ export type OrderPreview = {
   discount: number;
   deliveryFee: number;
   total: number;
+  /** the coupon as promotion knows it, when one was applied */
+  couponCode?: string | null;
   items: OrderPreviewItem[];
 };
 

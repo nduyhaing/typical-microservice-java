@@ -47,13 +47,16 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Orders (adapted from YAS OrderService). An order is built from the customer's pending checkout — its items and
  * prices — never from client totals (decisions.md 2c-1). Slice 3c: shipped to a saved or typed address with location
  * ids, taxed per line from the tax service, stock taken from product before the order is committed and given back
- * when the commit fails (3c-41..45). Status PENDING_PAYMENT; no discount, delivery fee or payment yet.
+ * when the commit fails (3c-41..45). Slice 4: an optional coupon verified with promotion discounts the eligible lines
+ * (tax on the discounted amounts) and takes one use from promotion before the commit, given back when the commit
+ * fails (4-50..4-55). Status PENDING_PAYMENT; no delivery fee or payment yet.
  *
  * <p>Place order runs in two phases. Outside any transaction: check the checkout, resolve the address (location),
- * get the tax rates (tax) and price it. Then one transaction: lock the checkout row, check it is still pending, take
- * the stock (product), save the order and complete the checkout. A concurrent second "Place order" for the same
+ * get the tax rates (tax), verify the coupon (promotion) and price it. Then one transaction: lock the checkout row,
+ * check it is still pending, take the stock (product), take the coupon use (promotion), save the order and complete
+ * the checkout. A concurrent second "Place order" for the same
  * checkout waits on the row lock and then finds it completed, so it never takes stock; if the transaction fails
- * after the stock was (or may have been) taken, the stock is given back under the same reference.
+ * after the stock or the coupon use was (or may have been) taken, they are given back under the same references.
  */
 @Slf4j
 @Service
@@ -67,6 +70,7 @@ public class OrderService {
     private final ProductService productService;
     private final TaxService taxService;
     private final LocationService locationService;
+    private final PromotionService promotionService;
     private final TransactionTemplate transactionTemplate;
 
     /** The server's price of a checkout shipped to an address; takes no stock and saves nothing (3c-46). */
@@ -74,7 +78,8 @@ public class OrderService {
         Checkout checkout = pendingOwnCheckout(previewPostVm.checkoutId());
         OrderAddress shipping = shippingAddress(previewPostVm.shippingAddressId(),
             previewPostVm.shippingAddressPostVm());
-        return OrderPreviewVm.of(checkout.getId(), price(checkout.getCheckoutItems(), shipping));
+        return OrderPreviewVm.of(checkout.getId(),
+            price(checkout.getCheckoutItems(), shipping, previewPostVm.couponCode()));
     }
 
     public OrderVm createOrder(OrderPostVm orderPostVm) {
@@ -83,14 +88,19 @@ public class OrderService {
         OrderAddressPostVm billingPostVm = orderPostVm.billingAddressPostVm();
         OrderAddress billing = billingPostVm == null ? copyOf(shipping)
             : locationService.resolveTypedAddress(billingPostVm);
-        OrderPricing pricing = price(checkout.getCheckoutItems(), shipping);
+        OrderPricing pricing = price(checkout.getCheckoutItems(), shipping, orderPostVm.couponCode());
 
         StockReservation reservation = new StockReservation();
+        CouponUsage usage = pricing.coupon() == null ? null : new CouponUsage();
         OrderVm order;
         try {
             order = transactionTemplate.execute(status ->
-                placeOrderInTransaction(orderPostVm, shipping, billing, pricing, reservation));
+                placeOrderInTransaction(orderPostVm, shipping, billing, pricing, reservation, usage));
         } catch (RuntimeException ex) {
+            if (usage != null && usage.mayHoldUse()) {
+                // compensation (4-53): the order was not saved, give the coupon use back
+                promotionService.releaseUsage(usage);
+            }
             if (reservation.mayHoldStock()) {
                 // compensation (3c-45): the order was not saved, give the units back
                 productService.restoreStock(reservation);
@@ -115,7 +125,7 @@ public class OrderService {
     }
 
     private OrderVm placeOrderInTransaction(OrderPostVm orderPostVm, OrderAddress shipping, OrderAddress billing,
-                                            OrderPricing pricing, StockReservation reservation) {
+                                            OrderPricing pricing, StockReservation reservation, CouponUsage usage) {
         // row lock: a concurrent call for the same checkout waits here, then sees COMPLETED and takes no stock
         Checkout checkout = checkoutRepository.findWithLockById(orderPostVm.checkoutId())
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.CHECKOUT_NOT_FOUND,
@@ -127,11 +137,15 @@ public class OrderService {
         productService.subtractStock(reservation, stockQuantities(checkout.getCheckoutItems()),
             checkout.getCheckoutItems().stream().collect(Collectors.toMap(CheckoutItem::getProductId,
                 CheckoutItem::getProductName, (first, second) -> first)));
-        return saveOrder(checkout, orderPostVm, shipping, billing, pricing);
+        if (usage != null) {
+            // one use, counted atomically by promotion; used up meanwhile -> 400, the stock is given back (4-53)
+            promotionService.applyUsage(usage, pricing.coupon());
+        }
+        return saveOrder(checkout, orderPostVm, shipping, billing, pricing, usage);
     }
 
     private OrderVm saveOrder(Checkout checkout, OrderPostVm orderPostVm, OrderAddress shipping, OrderAddress billing,
-                              OrderPricing pricing) {
+                              OrderPricing pricing, CouponUsage usage) {
         List<CheckoutItem> checkoutItems = checkout.getCheckoutItems();
         Order order = orderRepository.save(Order.builder()
             .customerId(checkout.getCustomerId())
@@ -144,6 +158,8 @@ public class OrderService {
             .totalPrice(pricing.total())
             .tax(pricing.totalTax())
             .discount(pricing.discount())
+            .couponCode(pricing.couponCode())
+            .promotionUsageReference(usage == null ? null : usage.reference())
             .deliveryFee(BigDecimal.ZERO)
             .orderStatus(OrderStatus.PENDING_PAYMENT)
             .paymentStatus(PaymentStatus.PENDING)
@@ -161,7 +177,7 @@ public class OrderService {
                     .productName(item.getProductName())
                     .quantity(item.getQuantity())
                     .productPrice(item.getProductPrice())
-                    .discountAmount(BigDecimal.ZERO)
+                    .discountAmount(line.discountAmount())
                     .taxAmount(line.taxAmount())
                     .taxPercent(line.taxPercent())
                     .shipmentFee(BigDecimal.ZERO)
@@ -193,13 +209,21 @@ public class OrderService {
             : locationService.resolveTypedAddress(typed);
     }
 
-    /** One tax call with the distinct tax classes of the lines (3c-44). */
-    private OrderPricing price(List<CheckoutItem> items, OrderAddress shipping) {
+    /**
+     * One tax call with the distinct tax classes of the lines (3c-44) and, with a coupon code, one promotion verify
+     * with the pre-discount subtotal and every product of the checkout (4-50); a blank code is no code.
+     */
+    private OrderPricing price(List<CheckoutItem> items, OrderAddress shipping, String couponCode) {
+        Coupon coupon = null;
+        if (couponCode != null && !couponCode.isBlank()) {
+            coupon = promotionService.verify(couponCode.trim(), OrderPricing.subtotalOf(items),
+                items.stream().map(CheckoutItem::getProductId).distinct().toList());
+        }
         List<Long> taxClassIds = items.stream().map(CheckoutItem::getTaxClassId).filter(Objects::nonNull)
             .distinct().toList();
         Map<Long, BigDecimal> rates = taxService.getRates(taxClassIds, shipping.getCountryId(),
             shipping.getStateOrProvinceId(), shipping.getZipCode());
-        return OrderPricing.of(items, rates);
+        return OrderPricing.of(items, rates, coupon);
     }
 
     /** One entry per product (a product on two checkout lines is merged). */

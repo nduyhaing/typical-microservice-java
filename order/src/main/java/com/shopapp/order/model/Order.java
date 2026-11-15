@@ -19,6 +19,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -62,6 +63,10 @@ public class Order extends AbstractAuditEntity {
 
     @Column(name = "promotion_code")
     private String couponCode;
+
+    /** The coupon use taken for this order in promotion (decisions.md 4-53); null without a coupon. */
+    @Column(name = "promotion_usage_reference")
+    private UUID promotionUsageReference;
 
     @Column(name = "total_amount")
     private BigDecimal totalPrice;

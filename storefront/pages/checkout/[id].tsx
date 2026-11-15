@@ -15,6 +15,7 @@ import { ApiError } from '../../common/services/ApiClientService';
 import { formatPrice } from '../../common/utils/format';
 import { getUserAddresses } from '../../modules/address/services/AddressService';
 import { LOGIN_URL } from '../../modules/auth/services/AuthenticationService';
+import { couponErrorMessage } from '../../modules/order/models/Coupon';
 import ShippingAddressPicker, {
   defaultShippingChoice,
   ShippingChoice,
@@ -38,9 +39,16 @@ function detailOf(error: unknown): string | undefined {
   return typeof detail === 'string' ? detail : undefined;
 }
 
+const COUPON_UNAVAILABLE = 'The coupon could not be checked right now. Please try again later.';
+
 function previewProblem(error: Error | undefined): string | undefined {
   if (!error) {
     return undefined;
+  }
+  const couponProblem = couponErrorMessage(error);
+  if (couponProblem) {
+    // e.g. the applied coupon was used up meanwhile: "Remove" prices the order without it
+    return couponProblem;
   }
   if (error instanceof ApiError && error.status === 404) {
     return 'This address is no longer in your address book. Please choose another one.';
@@ -51,12 +59,13 @@ function previewProblem(error: Error | undefined): string | undefined {
   return 'Tax could not be calculated right now. Please try again later.';
 }
 
-type SubmitError = { kind: 'retry' | 'login' | 'ordered' } | { kind: 'refused'; detail: string };
+type SubmitError = { kind: 'retry' | 'login' | 'ordered' } | { kind: 'refused' | 'coupon'; detail: string };
 
 /**
  * Checkout (slice 3c): items, a saved address (default preselected) or a new one, and the subtotal, tax and total
  * priced by the order service for that address — refreshed when the address changes; the browser never computes
- * tax (decisions.md 3c-46, 3c-48). Cash on delivery (payments: slice 5).
+ * tax (decisions.md 3c-46, 3c-48). A coupon code is applied by asking the server for a new preview with it; the
+ * summary then shows the discount and the order is placed with the code (4-56). Cash on delivery (payments: slice 5).
  */
 export default function CheckoutPage() {
   const router = useRouter();
@@ -71,10 +80,16 @@ export default function CheckoutPage() {
   const choice: ShippingChoice | undefined =
     picked ?? (savedAddresses ? defaultShippingChoice(savedAddresses) : addressesError ? { kind: 'new' } : undefined);
   const addressChoice = toAddressChoice(choice);
-  const preview = useFetch<OrderPreview | undefined>(
-    () => (checkout && addressChoice ? previewOrder(checkout.id, addressChoice) : Promise.resolve(undefined)),
-    [checkout?.id, addressChoice]
-  );
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCode, setAppliedCode] = useState<string>();
+  const [applying, setApplying] = useState(false);
+  const [couponError, setCouponError] = useState<string>();
+  const preview = useFetch<OrderPreview | undefined>(() => {
+    if (!checkout || !addressChoice) {
+      return Promise.resolve(undefined);
+    }
+    return appliedCode ? previewOrder(checkout.id, addressChoice, appliedCode) : previewOrder(checkout.id, addressChoice);
+  }, [checkout?.id, addressChoice, appliedCode]);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<SubmitError>();
@@ -83,6 +98,32 @@ export default function CheckoutPage() {
   const notFound = error instanceof ApiError && error.status === 404;
   const priced = !!addressChoice && !!preview.data && !preview.loading;
   const problem = addressChoice ? previewProblem(preview.error) : undefined;
+
+  // the server verifies the code: it is applied only when a preview with it succeeds
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim();
+    if (!checkout || !addressChoice || !code) {
+      return;
+    }
+    setApplying(true);
+    setCouponError(undefined);
+    try {
+      await previewOrder(checkout.id, addressChoice, code);
+      setAppliedCode(code);
+      setSubmitError(undefined);
+    } catch (error) {
+      setCouponError(couponErrorMessage(error) ?? COUPON_UNAVAILABLE);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCode(undefined);
+    setCouponInput('');
+    setCouponError(undefined);
+    setSubmitError(undefined);
+  };
 
   const handlePlaceOrder = async () => {
     if (!checkout || !addressChoice || !priced) {
@@ -96,13 +137,18 @@ export default function CheckoutPage() {
         ...addressChoice,
         note: note || undefined,
         paymentMethod: 'COD',
+        ...(appliedCode ? { couponCode: appliedCode } : {}),
       });
       await router.push(`/my-orders?placed=${order.id}`);
     } catch (error) {
       // only suggest retrying when a retry can succeed
       const detail = detailOf(error);
+      const couponProblem = couponErrorMessage(error);
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         setSubmitError({ kind: 'login' });
+      } else if (couponProblem) {
+        // e.g. the coupon was used up between the preview and the order
+        setSubmitError({ kind: 'coupon', detail: `${couponProblem} Remove it to order without the discount.` });
       } else if (error instanceof ApiError && error.status === 400 && detail?.includes('already been ordered')) {
         setSubmitError({ kind: 'ordered' });
       } else if (error instanceof ApiError && (error.status === 400 || error.status === 404) && detail) {
@@ -162,6 +208,7 @@ export default function CheckoutPage() {
                 This checkout has already been ordered. <Link href="/my-orders">See my orders</Link>
               </Alert>
             )}
+            {submitError?.kind === 'coupon' && <Alert variant="warning">{submitError.detail}</Alert>}
             {submitError?.kind === 'refused' && (
               <Alert variant="warning">
                 {submitError.detail} <Link href="/cart">Back to the cart</Link>
@@ -197,6 +244,14 @@ export default function CheckoutPage() {
                     {formatPrice(preview.data?.subtotal ?? checkout.totalAmount)}
                   </td>
                 </tr>
+                {priced && preview.data && preview.data.discount > 0 && (
+                  <tr>
+                    <td colSpan={2}>Discount{preview.data.couponCode ? ` (${preview.data.couponCode})` : ''}</td>
+                    <td className="text-end" data-testid="checkout-discount">
+                      −{formatPrice(preview.data.discount)}
+                    </td>
+                  </tr>
+                )}
                 <tr>
                   <td colSpan={2}>Tax</td>
                   <td className="text-end" data-testid="checkout-tax">
@@ -211,6 +266,36 @@ export default function CheckoutPage() {
                 </tr>
               </tfoot>
             </Table>
+            {appliedCode ? (
+              <p className="d-flex align-items-center gap-2" data-testid="coupon-applied">
+                <span>Coupon {preview.data?.couponCode ?? appliedCode} applied</span>
+                <Button variant="link" size="sm" className="p-0" onClick={handleRemoveCoupon}>
+                  Remove
+                </Button>
+              </p>
+            ) : (
+              <Form.Group controlId="coupon-code" className="mb-3">
+                <Form.Label>Coupon code</Form.Label>
+                <div className="d-flex gap-2">
+                  <Form.Control
+                    value={couponInput}
+                    maxLength={100}
+                    onChange={(event) => {
+                      setCouponInput(event.target.value);
+                      setCouponError(undefined);
+                    }}
+                  />
+                  <Button
+                    variant="outline-secondary"
+                    onClick={handleApplyCoupon}
+                    disabled={!couponInput.trim() || !addressChoice || applying}
+                  >
+                    Apply
+                  </Button>
+                </div>
+                {couponError && <Form.Text className="text-danger">{couponError}</Form.Text>}
+              </Form.Group>
+            )}
             {addressChoice && preview.loading && (
               <Spinner animation="border" size="sm" role="status" aria-label="Calculating tax" />
             )}

@@ -251,6 +251,136 @@ describe('Checkout page', () => {
 
     expect(await screen.findByRole('link', { name: 'Log in to check out' })).toBeInTheDocument();
   });
+
+  describe('coupon', () => {
+    // 10 % off 1638.00 = 163.80; tax on the discounted amount (1474.20 x 10 % = 147.42)
+    const discountedPreview = {
+      ...taxedPreview,
+      discount: 163.8,
+      totalTax: 147.42,
+      total: 1621.62,
+      couponCode: 'SAVE10',
+      items: [{ ...taxedPreview.items[0], discountAmount: 163.8, taxAmount: 147.42 }],
+    };
+    const promotionError = (title: string, detail: string) => new ApiError(400, { title, detail });
+
+    beforeEach(() => {
+      vi.mocked(orderService.previewOrder).mockImplementation(async (_id, _address, couponCode) => {
+        if (couponCode === undefined) {
+          return taxedPreview;
+        }
+        if (couponCode === 'SAVE10' || couponCode === 'save10') {
+          return discountedPreview;
+        }
+        throw promotionError('PROMOTION_NOT_FOUND', `Promotion ${couponCode} is not found`);
+      });
+    });
+
+    async function applyCoupon(code: string) {
+      await waitFor(() => expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$163.80'));
+      await userEvent.type(screen.getByLabelText('Coupon code'), code);
+      await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    }
+
+    it('applying a code re-prices the order on the server and shows the discount line', async () => {
+      render(<CheckoutPage />);
+      expect(await screen.findByRole('button', { name: 'Apply' })).toBeDisabled();
+      expect(screen.queryByTestId('checkout-discount')).not.toBeInTheDocument();
+
+      await applyCoupon(' save10 ');
+
+      expect(orderService.previewOrder).toHaveBeenCalledWith('c-1', { shippingAddressId: 101 }, 'save10');
+      await waitFor(() => expect(screen.getByTestId('checkout-discount')).toHaveTextContent('−$163.80'));
+      expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$147.42');
+      expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62');
+      expect(screen.getByText(/Coupon SAVE10 applied/)).toBeInTheDocument();
+    });
+
+    it('removing the coupon prices the order without it again', async () => {
+      render(<CheckoutPage />);
+      await applyCoupon('SAVE10');
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80'));
+      expect(screen.queryByTestId('checkout-discount')).not.toBeInTheDocument();
+      expect(orderService.previewOrder).toHaveBeenLastCalledWith('c-1', { shippingAddressId: 101 });
+      expect(screen.getByLabelText('Coupon code')).toHaveValue('');
+    });
+
+    it.each([
+      ['PROMOTION_NOT_FOUND', 'This coupon code does not exist.'],
+      ['PROMOTION_NOT_STARTED', 'This coupon is not valid yet.'],
+      ['PROMOTION_EXPIRED', 'This coupon has expired.'],
+      ['PROMOTION_USED_UP', 'This coupon has been used up.'],
+      ['MINIMUM_ORDER_NOT_REACHED', 'Your order does not reach the minimum amount for this coupon.'],
+      ['PROMOTION_NOT_APPLICABLE', 'This coupon does not apply to the products in your order.'],
+    ])('a refused code (%s) shows a friendly message and keeps the order priced without it', async (code, text) => {
+      vi.mocked(orderService.previewOrder).mockImplementation(async (_id, _address, couponCode) => {
+        if (couponCode === undefined) {
+          return taxedPreview;
+        }
+        throw promotionError(code, 'server text');
+      });
+      vi.mocked(orderService.placeOrder).mockResolvedValue(order);
+      render(<CheckoutPage />);
+
+      await applyCoupon('BAD');
+
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(screen.queryByTestId('checkout-discount')).not.toBeInTheDocument();
+      expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
+      await placeWithDefaultAddress();
+      expect(orderService.placeOrder).toHaveBeenCalledWith(expect.not.objectContaining({ couponCode: expect.anything() }));
+    });
+
+    it('a coupon that cannot be checked right now says so', async () => {
+      vi.mocked(orderService.previewOrder).mockImplementation(async (_id, _address, couponCode) => {
+        if (couponCode === undefined) {
+          return taxedPreview;
+        }
+        throw new ApiError(500, { detail: 'Promotion service is unavailable, please try again later' });
+      });
+      render(<CheckoutPage />);
+
+      await applyCoupon('SAVE10');
+
+      expect(await screen.findByText('The coupon could not be checked right now. Please try again later.')).toBeInTheDocument();
+      expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
+    });
+
+    it('places the order with the applied code', async () => {
+      vi.mocked(orderService.placeOrder).mockResolvedValue(order);
+      render(<CheckoutPage />);
+      await applyCoupon('SAVE10');
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62'));
+
+      await placeWithDefaultAddress();
+
+      expect(orderService.placeOrder).toHaveBeenCalledWith({
+        checkoutId: 'c-1',
+        shippingAddressId: 101,
+        note: undefined,
+        paymentMethod: 'COD',
+        couponCode: 'SAVE10',
+      });
+    });
+
+    it('a coupon used up while placing the order says so and offers to remove it', async () => {
+      vi.mocked(orderService.placeOrder).mockRejectedValue(
+        promotionError('PROMOTION_USED_UP', 'Promotion SAVE10 has been used up')
+      );
+      render(<CheckoutPage />);
+      await applyCoupon('SAVE10');
+      await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,621.62'));
+
+      await placeWithDefaultAddress();
+
+      expect(await screen.findByText(/This coupon has been used up\. Remove it to order without the discount\./)).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Back to the cart' })).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe('My orders page', () => {

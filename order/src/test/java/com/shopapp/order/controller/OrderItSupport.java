@@ -38,8 +38,8 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 /**
  * Shared Spring context and JDK HttpServer stubs of the services order calls: product (checkout prices with tax
- * class, stock subtract/restore), cart (cleanup), tax (location-based batch) and location (saved addresses,
- * countries, states, districts). One base class so every order IT shares one context and container.
+ * class, stock subtract/restore), cart (cleanup), tax (location-based batch), location (saved addresses,
+ * countries, states, districts) and promotion (coupon verify, apply-usage, release-usage). One base class so every order IT shares one context and container.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -68,7 +68,31 @@ abstract class OrderItSupport {
     static final List<Call> TAX_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> ADDRESS_CALLS = new CopyOnWriteArrayList<>();
     static final List<Call> VARIATION_CALLS = new CopyOnWriteArrayList<>();
+    static final AtomicBoolean PROMOTION_DOWN = new AtomicBoolean(false);
+    /** Status and body of the promotion verify stub (default: unknown code). */
+    static final AtomicReference<Answer> VERIFY_ANSWER = new AtomicReference<>();
+    /** Status and body of the promotion apply-usage stub (default: 200). */
+    static final AtomicReference<Answer> APPLY_ANSWER = new AtomicReference<>();
+    static final List<Call> VERIFY_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> APPLY_CALLS = new CopyOnWriteArrayList<>();
+    static final List<Call> RELEASE_CALLS = new CopyOnWriteArrayList<>();
     static final HttpServer BACKENDS = backends();
+
+    /** A stubbed answer. */
+    record Answer(int status, String body) {
+    }
+
+    static Answer promotionError(String code, String detail) {
+        return new Answer(400, "{\"statusCode\":\"400 BAD_REQUEST\",\"title\":\"" + code + "\",\"detail\":\"" + detail
+            + "\",\"fieldErrors\":[]}");
+    }
+
+    /** A valid coupon as promotion's verify answers it (decisions.md 4-43). */
+    static Answer validCoupon(String code, String discountType, String discountValue, String eligibleIds) {
+        return new Answer(200, "{\"isValid\":true,\"productId\":" + eligibleIds.split(",")[0] + ",\"productIds\":["
+            + eligibleIds + "],\"couponCode\":\"" + code + "\",\"discountType\":\"" + discountType
+            + "\",\"discountValue\":" + discountValue + ",\"promotionId\":9,\"promotionName\":\"Promo " + code + "\"}");
+    }
 
     /** Orderable products: id -> JSON (25 and 28 in tax class 1, 26 in class 2 without a rate, 27 without class). */
     private static final Map<Long, String> PRODUCTS = Map.of(
@@ -192,6 +216,23 @@ abstract class OrderItSupport {
                 respond(exchange, LOCATION_DOWN.get() ? 503 : 200,
                     hoChiMinh ? "[{\"id\":100,\"name\":\"District 1\"}]" : "[]");
             });
+            server.createContext("/promotion/storefront/promotions/verify", exchange -> {
+                VERIFY_CALLS.add(record(exchange));
+                Answer answer = VERIFY_ANSWER.get();
+                respond(exchange, PROMOTION_DOWN.get() ? 503 : answer.status(), answer.body());
+            });
+            server.createContext("/promotion/storefront/promotions/apply-usage", exchange -> {
+                Call call = record(exchange);
+                APPLY_CALLS.add(call);
+                Answer answer = APPLY_ANSWER.get();
+                respond(exchange, PROMOTION_DOWN.get() ? 503 : answer.status(), answer.status() == 200
+                    ? "{\"promotionId\":9,\"couponCode\":\"X\",\"reference\":\"" + call.param("reference") + "\"}"
+                    : answer.body());
+            });
+            server.createContext("/promotion/storefront/promotions/release-usage", exchange -> {
+                RELEASE_CALLS.add(record(exchange));
+                respond(exchange, 204, "");
+            });
             server.start();
             return server;
         } catch (IOException ex) {
@@ -234,6 +275,7 @@ abstract class OrderItSupport {
         registry.add("shopapp.services.cart", () -> base + "/cart");
         registry.add("shopapp.services.tax", () -> base + "/tax");
         registry.add("shopapp.services.location", () -> base + "/location");
+        registry.add("shopapp.services.promotion", () -> base + "/promotion");
     }
 
     // BACKENDS is shared by every IT class of this JVM (one Spring context); the JVM exit stops it
@@ -252,6 +294,12 @@ abstract class OrderItSupport {
         TAX_CALLS.clear();
         ADDRESS_CALLS.clear();
         VARIATION_CALLS.clear();
+        PROMOTION_DOWN.set(false);
+        VERIFY_ANSWER.set(promotionError("PROMOTION_NOT_FOUND", "Promotion is not found"));
+        APPLY_ANSWER.set(new Answer(200, ""));
+        VERIFY_CALLS.clear();
+        APPLY_CALLS.clear();
+        RELEASE_CALLS.clear();
         jdbc.execute("TRUNCATE order_item, \"order\", order_address, checkout_item, checkout RESTART IDENTITY CASCADE");
     }
 

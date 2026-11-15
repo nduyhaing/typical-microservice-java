@@ -15,18 +15,21 @@ public record OrderPreviewVm(
     BigDecimal discount,
     BigDecimal deliveryFee,
     BigDecimal total,
+    String couponCode,
     List<ItemVm> items
 ) {
 
     public record ItemVm(Long productId, String productName, int quantity, BigDecimal productPrice,
-                         BigDecimal subtotal, BigDecimal taxPercent, BigDecimal taxAmount) {
+                         BigDecimal subtotal, BigDecimal discountAmount, BigDecimal taxPercent,
+                         BigDecimal taxAmount) {
     }
 
     public static OrderPreviewVm of(String checkoutId, OrderPricing pricing) {
         return new OrderPreviewVm(checkoutId, pricing.subtotal(), pricing.totalTax(), pricing.discount(),
-            BigDecimal.ZERO, pricing.total(), pricing.lines().stream()
+            BigDecimal.ZERO, pricing.total(), pricing.couponCode(), pricing.lines().stream()
             .map(line -> new ItemVm(line.item().getProductId(), line.item().getProductName(),
-                line.item().getQuantity(), line.item().getProductPrice(), line.subtotal(), line.taxPercent(),
+                line.item().getQuantity(), line.item().getProductPrice(), line.subtotal(), line.discountAmount(),
+                line.taxPercent(),
                 line.taxAmount()))
             .toList());
     }

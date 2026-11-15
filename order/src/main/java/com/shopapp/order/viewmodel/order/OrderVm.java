@@ -12,7 +12,7 @@ import java.util.List;
 
 /**
  * An order as the storefront shows it ("my orders", order confirmation). {@code totalPrice} = subtotal + tax -
- * discount (decisions.md 3c-43).
+ * discount (decisions.md 3c-43); {@code couponCode} the coupon that gave the discount (4-50).
  */
 public record OrderVm(
     Long id,
@@ -25,6 +25,7 @@ public record OrderVm(
     BigDecimal discount,
     BigDecimal totalPrice,
     BigDecimal deliveryFee,
+    String couponCode,
     OrderStatus orderStatus,
     PaymentStatus paymentStatus,
     String paymentMethod,
@@ -35,11 +36,12 @@ public record OrderVm(
 ) {
 
     public record ItemVm(Long productId, String productName, int quantity, BigDecimal productPrice,
-                         BigDecimal taxPercent, BigDecimal taxAmount) {
+                         BigDecimal discountAmount, BigDecimal taxPercent, BigDecimal taxAmount) {
 
         static ItemVm fromModel(OrderItem item) {
             return new ItemVm(item.getProductId(), item.getProductName(), item.getQuantity(), item.getProductPrice(),
-                item.getTaxPercent(), item.getTaxAmount());
+                item.getDiscountAmount() == null ? BigDecimal.ZERO : item.getDiscountAmount(), item.getTaxPercent(),
+                item.getTaxAmount());
         }
     }
 
@@ -59,7 +61,7 @@ public record OrderVm(
             .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new OrderVm(order.getId(), order.getEmail(), order.getCheckoutId(), order.getNote(),
             order.getNumberItem(), subtotal, order.getTax(), order.getDiscount(), order.getTotalPrice(),
-            order.getDeliveryFee(),
+            order.getDeliveryFee(), order.getCouponCode(),
             order.getOrderStatus(), order.getPaymentStatus(), order.getPaymentMethodId(), order.getDeliveryStatus(),
             order.getCreatedOn(), AddressVm.fromModel(order.getShippingAddressId()),
             items.stream().map(ItemVm::fromModel).toList());
