@@ -18,21 +18,30 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
  * Fake product ({@code /product}) and location ({@code /location}) services on a JDK HttpServer. Products are
  * registered with {@link #product}; addresses are kept in memory; {@link #productDown()} / {@link #locationDown()}
- * make that service answer 503. Every request is recorded as {@code "METHOD uri | Authorization"}.
+ * make that service answer 503. Every request is recorded as {@code "METHOD uri | Authorization"}. Product keeps a
+ * sellable stock per product: {@code adjust-quantity} adds the deltas once per reference (like product, decisions.md
+ * 3c-60) and {@link #sale} takes units like an order would.
  */
 public final class ServicesStub implements AutoCloseable {
 
     /** A country id that location refuses with 400. */
     public static final long BAD_COUNTRY_ID = 999;
 
+    private static final Pattern DELTA = Pattern.compile("\\{\"productId\":(\\d+),\"delta\":(-?\\d+)}");
+
     private final HttpServer server;
     private final List<String> requests = new CopyOnWriteArrayList<>();
-    private final List<String> quantityUpdates = new CopyOnWriteArrayList<>();
+    private final List<String> adjustments = new CopyOnWriteArrayList<>();
+    private final Set<String> appliedReferences = ConcurrentHashMap.newKeySet();
+    private final Map<Long, Long> sellable = new ConcurrentHashMap<>();
+    private volatile boolean dropNextAdjustResponse;
     private final Map<Long, String[]> products = new ConcurrentSkipListMap<>();
     private final Map<Long, String> addresses = new ConcurrentHashMap<>();
     private final AtomicLong addressIds = new AtomicLong();
@@ -63,6 +72,21 @@ public final class ServicesStub implements AutoCloseable {
         products.put(id, new String[] {name, sku, String.valueOf(stockTracked)});
     }
 
+    /** An order took {@code quantity} units of the product's sellable stock. */
+    public void sale(long id, long quantity) {
+        sellable.merge(id, -quantity, Long::sum);
+    }
+
+    /** Product's sellable stock (0 until adjusted). */
+    public long sellable(long id) {
+        return sellable.getOrDefault(id, 0L);
+    }
+
+    /** The next adjust-quantity call is applied but its response is lost (connection closed). */
+    public void dropNextAdjustResponse() {
+        dropNextAdjustResponse = true;
+    }
+
     public void productDown() {
         productDown = true;
     }
@@ -73,7 +97,10 @@ public final class ServicesStub implements AutoCloseable {
 
     public void reset() {
         requests.clear();
-        quantityUpdates.clear();
+        adjustments.clear();
+        appliedReferences.clear();
+        sellable.clear();
+        dropNextAdjustResponse = false;
         products.clear();
         addresses.clear();
         productDown = false;
@@ -84,9 +111,14 @@ public final class ServicesStub implements AutoCloseable {
         return List.copyOf(requests);
     }
 
-    /** Bodies of {@code PUT /backoffice/products/update-quantity}, in order. */
-    public List<String> quantityUpdates() {
-        return List.copyOf(quantityUpdates);
+    /** Bodies of {@code PUT /backoffice/products/adjust-quantity}, in order (retries included). */
+    public List<String> adjustments() {
+        return adjustments.stream().map(entry -> entry.substring(entry.indexOf(' ') + 1)).toList();
+    }
+
+    /** The {@code reference} of each adjust-quantity call, in order. */
+    public List<String> adjustmentReferences() {
+        return adjustments.stream().map(entry -> entry.substring(0, entry.indexOf(' '))).toList();
     }
 
     public Map<Long, String> addresses() {
@@ -102,8 +134,20 @@ public final class ServicesStub implements AutoCloseable {
             }
             String method = exchange.getRequestMethod();
             String path = exchange.getRequestURI().getPath();
-            if (method.equals("PUT") && path.equals("/product/backoffice/products/update-quantity")) {
-                quantityUpdates.add(body);
+            if (method.equals("PUT") && path.equals("/product/backoffice/products/adjust-quantity")) {
+                String reference = query(exchange).get("reference");
+                adjustments.add(reference + " " + body);
+                if (appliedReferences.add(reference)) {
+                    Matcher item = DELTA.matcher(body);
+                    while (item.find()) {
+                        sellable.merge(Long.parseLong(item.group(1)), Long.parseLong(item.group(2)),
+                            (current, delta) -> Math.max(current + delta, 0));
+                    }
+                }
+                if (dropNextAdjustResponse) {
+                    dropNextAdjustResponse = false;
+                    return;
+                }
                 send(exchange, 204, null);
             } else if (method.equals("GET") && path.equals("/product/backoffice/products/for-warehouse")) {
                 send(exchange, 200, forWarehouse(query(exchange)));
@@ -208,9 +252,9 @@ public final class ServicesStub implements AutoCloseable {
         return params;
     }
 
-    private static String productJson(long id, String[] product) {
+    private String productJson(long id, String[] product) {
         return "{\"id\":" + id + ",\"name\":\"" + product[0] + "\",\"sku\":\"" + product[1]
-            + "\",\"stockTrackingEnabled\":" + product[2] + "}";
+            + "\",\"stockTrackingEnabled\":" + product[2] + ",\"stockQuantity\":" + sellable(id) + "}";
     }
 
     private static String withId(long id, String body) {

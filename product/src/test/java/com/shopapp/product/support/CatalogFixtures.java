@@ -11,6 +11,7 @@ import com.shopapp.product.repository.ProductCategoryRepository;
 import com.shopapp.product.repository.ProductRelatedRepository;
 import com.shopapp.product.repository.ProductRepository;
 import org.springframework.boot.test.context.TestComponent;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Builds catalog rows for integration tests.
@@ -66,6 +67,14 @@ public class CatalogFixtures {
 
     public Product save(Product product) {
         return productRepository.save(product);
+    }
+
+    /** Sets the stock quantity in the database (the entity never writes it, decisions.md 3c-61). */
+    @Transactional
+    public Product withStock(Product product, Long quantity) {
+        productRepository.setStock(product.getId(), quantity);
+        product.setStockQuantity(quantity);
+        return product;
     }
 
     public void inCategory(Product product, Category category) {

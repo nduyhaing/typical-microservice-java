@@ -16,6 +16,7 @@ import com.shopapp.product.viewmodel.product.ProductListGetVm;
 import com.shopapp.product.viewmodel.product.ProductListVm;
 import com.shopapp.product.viewmodel.product.ProductPostVm;
 import com.shopapp.product.viewmodel.product.ProductPutVm;
+import com.shopapp.product.viewmodel.product.ProductQuantityDeltaVm;
 import com.shopapp.product.viewmodel.product.ProductQuantityPostVm;
 import com.shopapp.product.viewmodel.product.ProductQuantityPutVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
@@ -191,7 +192,7 @@ public class ProductController {
         return ResponseEntity.ok(productService.getRelatedProductsStorefront(id, pageNo, pageSize));
     }
 
-    /** YAS: the inventory service sets each product's stock quantity (its total over all warehouses). ADMIN. */
+    /** YAS: sets each product's stock quantity. ADMIN; inventory sends deltas to adjust-quantity instead (3c-60). */
     @PutMapping(path = "/backoffice/products/update-quantity", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Void> updateProductQuantity(
         @Valid @RequestBody @NotEmpty @Size(max = MAX_QUANTITY_ITEMS) List<ProductQuantityPostVm> items) {
@@ -200,14 +201,27 @@ public class ProductController {
     }
 
     /**
+     * Inventory's stock adjustment: adds each product's delta (negative removes) to its sellable stock, never below
+     * 0, applied once per {@code reference} (decisions.md 3c-60). ADMIN.
+     */
+    @PutMapping(path = "/backoffice/products/adjust-quantity", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> adjustProductQuantity(
+        @Valid @RequestBody @NotEmpty @Size(max = MAX_QUANTITY_ITEMS) List<ProductQuantityDeltaVm> items,
+        @RequestParam("reference") @Pattern(regexp = REFERENCE_PATTERN) String reference) {
+        productStockService.adjustStockQuantity(items, reference);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * YAS: the order service takes stock with the customer's token, so any signed-in user may call it; it only
-     * decreases, atomically, all or nothing (decisions.md 3c-21). {@code reference} (optional) records the units for
-     * {@link #restoreProductQuantity(String)}.
+     * decreases, atomically, all or nothing (decisions.md 3c-21). {@code reference} (required) records the units for
+     * {@link #restoreProductQuantity(String)}. Only reachable inside the compose network: nginx and the BFFs refuse
+     * it (3c-63).
      */
     @PutMapping(path = "/backoffice/products/subtract-quantity", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Void> subtractProductQuantity(
         @Valid @RequestBody @NotEmpty @Size(max = MAX_QUANTITY_ITEMS) List<ProductQuantityPutVm> items,
-        @RequestParam(value = "reference", required = false) @Pattern(regexp = REFERENCE_PATTERN) String reference) {
+        @RequestParam("reference") @Pattern(regexp = REFERENCE_PATTERN) String reference) {
         productStockService.subtractStockQuantity(items, reference);
         return ResponseEntity.noContent().build();
     }

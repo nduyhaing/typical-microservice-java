@@ -44,6 +44,13 @@ server {
     # media uploads: a 10 MB file plus its multipart overhead; the media service enforces 10 MB per file (3b-23)
     client_max_body_size 11m;
 
+    # Product's order-only stock endpoints: the order service calls them inside the compose network
+    # (http://product:8080); never through the gateway, where any signed-in customer could take stock (3c-63).
+    location ~* ^/product/+backoffice/+products/+(subtract|restore)-quantity {
+        default_type application/json;
+        return 403 '{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}';
+    }
+
     location /product/ {
         set $upstream_product product:8080;
         proxy_pass http://$upstream_product;

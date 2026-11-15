@@ -7,14 +7,14 @@ import jakarta.validation.constraints.Size;
 /**
  * A new address typed in at checkout. The country is chosen from location's list (required); state/province and
  * district are optional but must belong to the country / state. Names come from location, never from the browser
- * (decisions.md 3c-41).
+ * (decisions.md 3c-41). Text fields allow 450 characters, like location (3c-62).
  */
 public record OrderAddressPostVm(
-    @NotBlank @Size(max = 255) String contactName,
+    @NotBlank @Size(max = 450) String contactName,
     @NotBlank @Size(max = 255) String phone,
-    @NotBlank @Size(max = 255) String addressLine1,
-    @Size(max = 255) String addressLine2,
-    @Size(max = 255) String city,
+    @NotBlank @Size(max = 450) String addressLine1,
+    @Size(max = 450) String addressLine2,
+    @Size(max = 450) String city,
     @Size(max = 25) String zipCode,
     @NotNull Long countryId,
     Long stateOrProvinceId,

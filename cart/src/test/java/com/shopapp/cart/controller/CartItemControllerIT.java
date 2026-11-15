@@ -1,5 +1,6 @@
 package com.shopapp.cart.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -284,6 +285,24 @@ class CartItemControllerIT {
             .andExpect(jsonPath("$.detail").value("Only 3 of P12 are in stock"));
         mockMvc.perform(json(put("/storefront/cart/items/12"), "{\"quantity\":3}").with(user("u-1")))
             .andExpect(status().isOk());
+    }
+
+    @Test
+    void update_lineAboveStock_canStepDown_butNotUp() throws Exception {
+        // stock fell to 3 after 5 were put in the cart: "-" must still work (3c review I4)
+        stored("u-1", 12L, 5);
+        stored("u-1", 13L, 2);
+
+        mockMvc.perform(json(put("/storefront/cart/items/12"), "{\"quantity\":4}").with(user("u-1")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.quantity").value(4));
+        mockMvc.perform(json(put("/storefront/cart/items/12"), "{\"quantity\":6}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Only 3 of P12 are in stock"));
+        mockMvc.perform(json(put("/storefront/cart/items/13"), "{\"quantity\":1}").with(user("u-1")))
+            .andExpect(status().isOk());
+        assertThat(repository.findByCustomerIdOrderByCreatedOnDesc("u-1")).filteredOn(item -> item.getProductId() == 12L)
+            .singleElement().extracting(CartItem::getQuantity).isEqualTo(4);
     }
 
     @Test

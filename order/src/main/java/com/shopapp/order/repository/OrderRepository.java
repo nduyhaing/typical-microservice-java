@@ -16,6 +16,8 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
     Optional<Order> findByCheckoutId(String checkoutId);
 
+    boolean existsByCheckoutId(String checkoutId);
+
     @Query("SELECT o FROM Order o ORDER BY o.createdOn DESC")
     List<Order> getLatestOrders(Pageable pageable);
 }

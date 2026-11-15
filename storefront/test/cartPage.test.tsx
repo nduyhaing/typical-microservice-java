@@ -116,5 +116,17 @@ describe('Cart page', () => {
     expect(screen.getByTestId('stock-2')).toHaveTextContent('Only 1 in stock');
     expect(screen.queryByTestId('stock-1')).not.toBeInTheDocument();
   });
+
+  it('minus steps a line above the stock down (3c review I4)', async () => {
+    vi.mocked(cartService.getCartLines).mockResolvedValue([{ ...lines[1], quantity: 3, stockQuantity: 1 }]);
+    vi.mocked(cartService.updateQuantity).mockResolvedValue(undefined as never);
+
+    render(<CartPage />);
+
+    const minus = await screen.findByRole('button', { name: `Decrease ${lines[1].name}` });
+    expect(minus).toBeEnabled();
+    await userEvent.click(minus);
+    expect(cartService.updateQuantity).toHaveBeenCalledWith(lines[1].productId, 2);
+  });
 });
 

@@ -16,7 +16,11 @@ type Input = { quantity: string; note: string };
 
 const noStocks = () => Promise.resolve<Stock[]>([]);
 
-/** Stock of one warehouse (YAS warehouse-stocks): adjust quantities (+/-) with a note, see each product's history. */
+/**
+ * Stock of one warehouse (YAS warehouse-stocks): adjust quantities (+/-) with a note, see each product's history.
+ * The warehouse quantity is physical; the product's sellable stock (orders take from it) is shown next to it — an
+ * adjustment changes both by the same amount (decisions.md 3c-60).
+ */
 export default function WarehouseStocksPage() {
   const [warehouseId, setWarehouseId] = useWarehouseId();
   const [nameInput, setNameInput] = useState('');
@@ -136,7 +140,10 @@ export default function WarehouseStocksPage() {
               <tr>
                 <th>Name</th>
                 <th>SKU</th>
-                <th className="text-end">Quantity</th>
+                <th className="text-end">In this warehouse</th>
+                <th className="text-end" title="What orders can still take: all warehouses, minus units sold since">
+                  Sellable (all warehouses)
+                </th>
                 <th>Adjustment (+/-)</th>
                 <th>Note</th>
                 <th />
@@ -150,6 +157,7 @@ export default function WarehouseStocksPage() {
                     <td>{name}</td>
                     <td>{stock.productSku}</td>
                     <td className="text-end">{stock.quantity}</td>
+                    <td className="text-end">{stock.productStockQuantity ?? '-'}</td>
                     <td style={{ maxWidth: '9rem' }}>
                       <Form.Control
                         size="sm"

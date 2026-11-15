@@ -1,6 +1,8 @@
 package com.shopapp.order.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -104,6 +106,63 @@ class OrderTaxStockIT extends OrderItSupport {
             .andExpect(jsonPath("$.totalPrice").value(30.0));
 
         assertThat(TAX_CALLS).isEmpty();
+    }
+
+    @Test
+    void placeOrder_addressLocationReturnsButSomeoneElseOwns_returns404AndNoOrder() throws Exception {
+        // location answers an admin any address; order still ships only to the caller's own (3c review M6)
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+
+        mockMvc.perform(placeOrderWithSavedAddress(checkoutId, 300).with(customer("u-1")))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.detail").value("Address 300 is not found"));
+        mockMvc.perform(json(post("/storefront/orders/preview"), "{\"checkoutId\":\"" + checkoutId
+                + "\",\"shippingAddressId\":300}").with(customer("u-1")))
+            .andExpect(status().isNotFound());
+
+        assertThat(orderCount()).isZero();
+        assertThat(SUBTRACT_CALLS).isEmpty();
+    }
+
+    @Test
+    void placeOrder_savedAddressWithA300CharacterLine_isPlaced() throws Exception {
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+
+        mockMvc.perform(placeOrderWithSavedAddress(checkoutId, 400).with(customer("u-1")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.shippingAddressVm.addressLine1").value(LONG_LINE));
+
+        assertThat(orderCount()).isEqualTo(1);
+    }
+
+    @Test
+    void placeOrder_typedAddressLinesUpTo450Characters() throws Exception {
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+        String tooLong = "{\"contactName\":\"Customer One\",\"phone\":\"0901\",\"addressLine1\":\""
+            + "a".repeat(451) + "\",\"countryId\":1}";
+        mockMvc.perform(placeOrderTyped(checkoutId, tooLong).with(customer("u-1")))
+            .andExpect(status().isBadRequest());
+
+        String longest = "{\"contactName\":\"" + "c".repeat(450) + "\",\"phone\":\"0901\",\"addressLine1\":\""
+            + "a".repeat(450) + "\",\"addressLine2\":\"" + "b".repeat(450) + "\",\"city\":\"" + "d".repeat(450)
+            + "\",\"countryId\":1}";
+        mockMvc.perform(placeOrderTyped(checkoutId, longest).with(customer("u-1")))
+            .andExpect(status().isOk());
+        assertThat(orderCount()).isEqualTo(1);
+    }
+
+    @Test
+    void placeOrder_otherIntegrityViolation_is500NotAlreadyOrdered_andRestoresStock() throws Exception {
+        String checkoutId = createCheckout("u-1", "[{\"productId\":25,\"quantity\":1}]");
+
+        mockMvc.perform(placeOrderWithSavedAddress(checkoutId, 500).with(customer("u-1")))
+            .andExpect(status().isInternalServerError())
+            .andExpect(jsonPath("$.detail").value(not(containsString("already been ordered"))));
+
+        assertThat(orderCount()).isZero();
+        assertThat(checkoutState(checkoutId)).isEqualTo("PENDING");
+        assertThat(RESTORE_CALLS).hasSize(1);
+        assertThat(RESTORE_CALLS.getFirst().param("reference")).isEqualTo(SUBTRACT_CALLS.getFirst().param("reference"));
     }
 
     @Test

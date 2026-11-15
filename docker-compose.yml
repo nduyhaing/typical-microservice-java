@@ -204,8 +204,9 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # stock subtract/restore are refused by nginx, so product is called straight on the network (3c-63)
+      SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
       # in-network through the nginx alias, like the browser-facing API
-      SHOPAPP_SERVICES_PRODUCT: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/product
       SHOPAPP_SERVICES_CART: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/cart
       # tax rates and saved addresses at order time, straight to the containers (decisions.md 3c-44)
       SHOPAPP_SERVICES_TAX: http://tax:8080/tax

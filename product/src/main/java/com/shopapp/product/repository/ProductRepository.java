@@ -128,6 +128,20 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     @Query("UPDATE Product p SET p.stockQuantity = COALESCE(p.stockQuantity, 0) + :quantity WHERE p.id = :id")
     int addStock(@Param("id") Long id, @Param("quantity") long quantity);
 
+    /** Sets the stock quantity (admin update-quantity); the entity never writes the column (decisions.md 3c-61). */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Product p SET p.stockQuantity = :quantity WHERE p.id = :id")
+    int setStock(@Param("id") Long id, @Param("quantity") Long quantity);
+
+    /**
+     * Inventory's stock adjustment (decisions.md 3c-60): adds {@code delta} (negative removes) to the current
+     * quantity, atomically, never going below 0; a missing quantity counts as 0.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Product p SET p.stockQuantity = GREATEST(COALESCE(p.stockQuantity, 0) + :delta, 0) "
+        + "WHERE p.id = :id")
+    int adjustStock(@Param("id") Long id, @Param("delta") long delta);
+
     /**
      * Inventory's product lookup (YAS for-warehouse): products that can hold stock (not a parent with options),
      * name and sku contain the given text (case-insensitive, empty = any), and in / not in the given ids.

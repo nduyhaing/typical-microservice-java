@@ -2,6 +2,7 @@ package com.shopapp.order.service;
 
 import com.shopapp.commonlibrary.exception.BadRequestException;
 import com.shopapp.commonlibrary.exception.ForbiddenException;
+import com.shopapp.commonlibrary.exception.InternalServerErrorException;
 import com.shopapp.commonlibrary.exception.NotFoundException;
 import com.shopapp.commonlibrary.utils.AuthenticationUtils;
 import com.shopapp.order.model.Checkout;
@@ -32,6 +33,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +51,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * checkout waits on the row lock and then finds it completed, so it never takes stock; if the transaction fails
  * after the stock was (or may have been) taken, the stock is given back under the same reference.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -89,8 +92,14 @@ public class OrderService {
                 productService.restoreStock(reservation);
             }
             if (ex instanceof DataIntegrityViolationException) {
-                // the unique index on order.checkout_id caught a concurrent second order (decisions.md 2c-8)
-                throw new BadRequestException(Constants.ErrorCode.CHECKOUT_ALREADY_ORDERED, orderPostVm.checkoutId());
+                if (orderRepository.existsByCheckoutId(orderPostVm.checkoutId())) {
+                    // the unique index on order.checkout_id caught a concurrent second order (decisions.md 2c-8)
+                    throw new BadRequestException(Constants.ErrorCode.CHECKOUT_ALREADY_ORDERED,
+                        orderPostVm.checkoutId());
+                }
+                // any other constraint: a bug or bad data, not the customer's fault (3c-62)
+                log.error("Could not save the order of checkout {}", orderPostVm.checkoutId(), ex);
+                throw new InternalServerErrorException("The order could not be saved, please try again later");
             }
             throw ex;
         }

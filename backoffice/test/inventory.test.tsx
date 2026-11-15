@@ -172,8 +172,8 @@ describe('Warehouses', () => {
 
 describe('Warehouse stocks', () => {
   const stocks = [
-    { id: 5, productId: 10, productName: 'Pixel 9', productSku: 'PX9', quantity: 3, reservedQuantity: 0, warehouseId: 1 },
-    { id: 6, productId: 11, productName: 'Pixel 8', productSku: 'PX8', quantity: 7, reservedQuantity: 0, warehouseId: 1 },
+    { id: 5, productId: 10, productName: 'Pixel 9', productSku: 'PX9', quantity: 3, reservedQuantity: 0, warehouseId: 1, productStockQuantity: 12 },
+    { id: 6, productId: 11, productName: 'Pixel 8', productSku: 'PX8', quantity: 7, reservedQuantity: 0, warehouseId: 1, productStockQuantity: null },
   ];
 
   beforeEach(() => {
@@ -209,6 +209,20 @@ describe('Warehouse stocks', () => {
     expect(stockService.adjustStocks).toHaveBeenLastCalledWith([{ stockId: 5, quantity: -2, note: 'damaged' }]);
     expect(await screen.findByText('Stock quantities updated.')).toBeInTheDocument();
     expect(stockService.getStocks).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the product's sellable stock (all warehouses, after orders) next to the warehouse quantity", async () => {
+    router.query = { warehouseId: '1' };
+
+    render(<WarehouseStocksPage />);
+    const row = (await screen.findByText('Pixel 9')).closest('tr')!;
+    expect(screen.getByRole('columnheader', { name: 'In this warehouse' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Sellable (all warehouses)' })).toBeInTheDocument();
+    const cells = within(row).getAllByRole('cell');
+    expect(cells[2]).toHaveTextContent('3');
+    expect(cells[3]).toHaveTextContent('12');
+    const unknown = screen.getByText('Pixel 8').closest('tr')!;
+    expect(within(unknown).getAllByRole('cell')[3]).toHaveTextContent('-');
   });
 
   it('refuses a non-integer adjustment without calling the server', async () => {

@@ -35,6 +35,11 @@ import org.springframework.security.web.server.util.matcher.ServerWebExchangeMat
 @EnableWebFluxSecurity
 public class SecurityConfig {
 
+    /** Product's subtract/restore-quantity: never through a BFF, also not for an admin (3c review I3, 3c-63). */
+    private static final String[] STOCK_WRITES = {
+        "/api/product/backoffice/products/subtract-quantity/**",
+        "/api/product/backoffice/products/restore-quantity/**"};
+
     private static final String REALM_ACCESS_CLAIM = "realm_access";
     private static final String ROLES_CLAIM = "roles";
     private static final String LOGIN_PATH = "/oauth2/authorization/keycloak";
@@ -49,6 +54,8 @@ public class SecurityConfig {
     public SecurityWebFilterChain springSecurityFilterChain(ServerHttpSecurity http) {
         return http
             .authorizeExchange(auth -> auth
+                // product's order-only stock endpoints are for the order service inside the network (3c-63)
+                .pathMatchers(STOCK_WRITES).denyAll()
                 .pathMatchers("/actuator/health", "/actuator/health/**").permitAll()
                 .anyExchange().hasRole("ADMIN"))
             .oauth2Login(Customizer.withDefaults())

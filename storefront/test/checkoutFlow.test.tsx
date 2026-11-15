@@ -132,6 +132,17 @@ describe('Checkout page', () => {
     expect(screen.getByText('Cash on delivery')).toBeInTheDocument();
   });
 
+  it("shows each line's amount from the server preview, never multiplied in the browser", async () => {
+    // a server line subtotal that browser math (819 x 2 = 1638) would not give
+    vi.mocked(orderService.previewOrder).mockResolvedValue({
+      ...taxedPreview,
+      items: [{ ...taxedPreview.items[0], subtotal: 1637.99 }],
+    });
+    render(<CheckoutPage />);
+
+    await waitFor(() => expect(screen.getByTestId('checkout-line-1')).toHaveTextContent('$1,637.99'));
+  });
+
   it('refreshes the summary from the server when another address is chosen', async () => {
     render(<CheckoutPage />);
     await waitFor(() => expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$163.80'));

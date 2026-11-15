@@ -175,13 +175,20 @@ export default function CheckoutPage() {
             <h2 className="h5">Your order</h2>
             <Table size="sm">
               <tbody>
-                {checkout.checkoutItemVms.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.productName}</td>
-                    <td className="text-end text-nowrap">× {item.quantity}</td>
-                    <td className="text-end">{formatPrice(item.productPrice * item.quantity)}</td>
-                  </tr>
-                ))}
+                {checkout.checkoutItemVms.map((item, index) => {
+                  // the server's line amount from the preview (same order as the checkout lines); never price * qty
+                  const line = preview.data?.items[index];
+                  const amount = line && line.productId === item.productId ? line.subtotal : undefined;
+                  return (
+                    <tr key={item.id}>
+                      <td>{item.productName}</td>
+                      <td className="text-end text-nowrap">× {item.quantity}</td>
+                      <td className="text-end" data-testid={`checkout-line-${item.id}`}>
+                        {amount === undefined ? '—' : formatPrice(amount)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>

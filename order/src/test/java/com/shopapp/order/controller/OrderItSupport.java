@@ -76,16 +76,30 @@ abstract class OrderItSupport {
         27L, "{\"id\":27,\"name\":\"Phone Case\",\"price\":10.0,\"taxClassId\":null}",
         28L, "{\"id\":28,\"name\":\"Sticker\",\"price\":0.25,\"taxClassId\":1}");
 
-    /** Saved addresses in location: id -> owner token, JSON. 100 belongs to u-1, 200 to u-2. */
+    /** A 300-character address line: location allows 450 (3c review I2). */
+    static final String LONG_LINE = "9".repeat(300);
+
+    /**
+     * Saved addresses in location: id -> token location answers it to ({@code *}: anyone, as location does for an
+     * admin), JSON with its owner in {@code createdBy}. 100 belongs to u-1, 200 to u-2; 300 belongs to u-2 but is
+     * answered to anyone; 400 (u-1) has a 300-character line; 500 (u-1) a line longer than any order column.
+     */
     private static final Map<String, String[]> ADDRESSES = Map.of(
         "100", new String[] {"Bearer token-u-1", "{\"id\":100,\"contactName\":\"Customer One\",\"phone\":\"0901\","
             + "\"addressLine1\":\"1 Le Loi\",\"addressLine2\":null,\"city\":\"Ho Chi Minh City\",\"zipCode\":\"700000\","
             + "\"districtId\":100,\"districtName\":\"District 1\",\"stateOrProvinceId\":10,"
-            + "\"stateOrProvinceName\":\"Ho Chi Minh\",\"countryId\":1,\"countryName\":\"Viet Nam\"}"},
-        "200", new String[] {"Bearer token-u-2", "{\"id\":200,\"contactName\":\"Customer Two\",\"phone\":\"0902\","
-            + "\"addressLine1\":\"2 Main St\",\"addressLine2\":null,\"city\":\"Hanoi\",\"zipCode\":null,"
-            + "\"districtId\":null,\"districtName\":null,\"stateOrProvinceId\":null,"
-            + "\"stateOrProvinceName\":null,\"countryId\":1,\"countryName\":\"Viet Nam\"}"});
+            + "\"stateOrProvinceName\":\"Ho Chi Minh\",\"countryId\":1,\"countryName\":\"Viet Nam\",\"createdBy\":\"u-1\"}"},
+        "200", new String[] {"Bearer token-u-2", savedAddress(200, "2 Main St", "u-2")},
+        "300", new String[] {"*", savedAddress(300, "3 Main St", "u-2")},
+        "400", new String[] {"Bearer token-u-1", savedAddress(400, LONG_LINE, "u-1")},
+        "500", new String[] {"Bearer token-u-1", savedAddress(500, "5".repeat(600), "u-1")});
+
+    private static String savedAddress(long id, String line1, String owner) {
+        return "{\"id\":" + id + ",\"contactName\":\"Customer\",\"phone\":\"0902\",\"addressLine1\":\"" + line1
+            + "\",\"addressLine2\":null,\"city\":\"Hanoi\",\"zipCode\":null,\"districtId\":null,"
+            + "\"districtName\":null,\"stateOrProvinceId\":null,\"stateOrProvinceName\":null,\"countryId\":1,"
+            + "\"countryName\":\"Viet Nam\",\"createdBy\":\"" + owner + "\"}";
+    }
 
     @Autowired
     MockMvc mockMvc;
@@ -141,7 +155,7 @@ abstract class OrderItSupport {
                 String[] address = ADDRESSES.get(id);
                 if (LOCATION_DOWN.get()) {
                     respond(exchange, 503, "");
-                } else if (address == null || !address[0].equals(call.authorization())) {
+                } else if (address == null || !(address[0].equals("*") || address[0].equals(call.authorization()))) {
                     // location answers 404 for another user's address (3c-5)
                     respond(exchange, 404, "{\"statusCode\":\"404 NOT_FOUND\",\"title\":\"Not Found\","
                         + "\"detail\":\"Address " + id + " is not found\",\"fieldErrors\":[]}");

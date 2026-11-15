@@ -52,17 +52,91 @@ class StockIT extends AbstractInventoryIT {
                 .param("productSku", "ph-").with(admin()))
             .andExpect(jsonPath("$[*].productName", contains("Phone")));
 
-        // the products' stock quantity now follows the warehouses (total 0)
-        assertThat(STUB.quantityUpdates()).containsExactly(
-            "[{\"productId\":10,\"stockQuantity\":0},{\"productId\":11,\"stockQuantity\":0}]");
-        assertThat(STUB.requests()).filteredOn(r -> r.startsWith("PUT /product"))
-            .allMatch(r -> r.endsWith("Bearer " + ADMIN_TOKEN));
+    }
+
+    @Test
+    void addProducts_sendsNoStockChange_andLooksTheProductsUpInOneCall() throws Exception {
+        mockMvc.perform(post("/backoffice/stocks").with(admin()).contentType(MediaType.APPLICATION_JSON)
+                .content("[{\"productId\":10,\"warehouseId\":" + main + "},{\"productId\":11,\"warehouseId\":"
+                    + main + "}]"))
+            .andExpect(status().isNoContent());
+
+        // quantity 0 changes no sellable stock (decisions.md 3c-60)
+        assertThat(STUB.adjustments()).isEmpty();
+        assertThat(STUB.requests()).filteredOn(r -> r.startsWith("PUT /product")).isEmpty();
+        // one product lookup for the whole list (3c review M3)
+        assertThat(STUB.requests()).filteredOn(r -> r.startsWith("GET /product")).singleElement()
+            .satisfies(r -> assertThat(r).startsWith("GET /product/backoffice/products/for-warehouse")
+                .contains("productIds=10,11").endsWith("Bearer " + ADMIN_TOKEN));
+    }
+
+    @Test
+    void list_showsTheProductsSellableStockNextToTheWarehouseQuantity() throws Exception {
+        long stockId = addStock(10, main);
+        adjust(stockId, 5, "in");
+        STUB.sale(10, 2);
+        mockMvc.perform(get("/backoffice/stocks").param("warehouseId", String.valueOf(main)).with(admin()))
+            .andExpect(jsonPath("$[0].quantity").value(5))
+            .andExpect(jsonPath("$[0].productStockQuantity").value(3));
+    }
+
+    @Test
+    void adjust_afterASale_sendsTheDelta_notTheWarehouseTotal() throws Exception {
+        long stockId = addStock(10, main);
+        adjust(stockId, 10, "delivery");
+        assertThat(STUB.sellable(10)).isEqualTo(10);
+
+        // an order takes 2 units on the product side; the warehouse still holds 10 (physical)
+        STUB.sale(10, 2);
+        adjust(stockId, 1, "found one");
+
+        assertThat(quantityOf(stockId)).isEqualTo(11);
+        assertThat(STUB.adjustments()).last().isEqualTo("[{\"productId\":10,\"delta\":1}]");
+        assertThat(STUB.sellable(10)).isEqualTo(9);
+    }
+
+    @Test
+    void adjust_twoWarehousesOfOneProduct_sendTheSum_andAZeroSumSendsNothing() throws Exception {
+        long mainStock = addStock(10, main);
+        long annex = createWarehouse("Annex");
+        long annexStock = addStock(10, annex);
+        adjust(mainStock, 5, "in");
+        int calls = STUB.adjustments().size();
+
+        // a transfer: -2 here, +2 there
+        mockMvc.perform(put("/backoffice/stocks").with(admin()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"stockQuantityList\":[{\"stockId\":" + mainStock + ",\"quantity\":-2,\"note\":\"out\"},"
+                    + "{\"stockId\":" + annexStock + ",\"quantity\":2,\"note\":\"in\"}]}"))
+            .andExpect(status().isOk());
+        assertThat(STUB.adjustments()).hasSize(calls);
+
+        mockMvc.perform(put("/backoffice/stocks").with(admin()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"stockQuantityList\":[{\"stockId\":" + mainStock + ",\"quantity\":1,\"note\":\"a\"},"
+                    + "{\"stockId\":" + annexStock + ",\"quantity\":3,\"note\":\"b\"}]}"))
+            .andExpect(status().isOk());
+        assertThat(STUB.adjustments()).last().isEqualTo("[{\"productId\":10,\"delta\":4}]");
+        assertThat(STUB.sellable(10)).isEqualTo(9);
+    }
+
+    @Test
+    void adjust_productResponseLost_isRetriedWithTheSameReference_andAppliedOnce() throws Exception {
+        long stockId = addStock(10, main);
+        STUB.dropNextAdjustResponse();
+
+        adjust(stockId, 4, "delivery");
+
+        assertThat(quantityOf(stockId)).isEqualTo(4);
+        assertThat(STUB.adjustmentReferences()).hasSize(2);
+        assertThat(STUB.adjustmentReferences().get(1)).isEqualTo(STUB.adjustmentReferences().get(0));
+        assertThat(STUB.sellable(10)).isEqualTo(4);
+        // the reference is kept with the history row
+        assertThat(jdbc.queryForObject("select reference from stock_history", String.class))
+            .isEqualTo(STUB.adjustmentReferences().get(0));
     }
 
     @Test
     void addProducts_refusals() throws Exception {
         addStock(10, main);
-        STUB.quantityUpdates();
         mockMvc.perform(post("/backoffice/stocks").with(admin()).contentType(MediaType.APPLICATION_JSON)
                 .content(stockPost(10, main)))
             .andExpect(status().isBadRequest());
@@ -90,7 +164,7 @@ class StockIT extends AbstractInventoryIT {
     }
 
     @Test
-    void adjust_changesQuantity_writesHistory_andSyncsTheProductTotal() throws Exception {
+    void adjust_changesQuantity_writesHistory_andSendsTheDeltaToProduct() throws Exception {
         long stockId = addStock(10, main);
         long annex = createWarehouse("Annex");
         long annexStock = addStock(10, annex);
@@ -98,10 +172,14 @@ class StockIT extends AbstractInventoryIT {
         adjust(stockId, 5, "first delivery");
         adjust(stockId, 3, "second delivery");
         assertThat(quantityOf(stockId)).isEqualTo(8);
-        assertThat(STUB.quantityUpdates()).last().isEqualTo("[{\"productId\":10,\"stockQuantity\":8}]");
+        assertThat(STUB.adjustments()).containsExactly("[{\"productId\":10,\"delta\":5}]",
+            "[{\"productId\":10,\"delta\":3}]");
 
         adjust(annexStock, 2, "annex delivery");
-        assertThat(STUB.quantityUpdates()).last().isEqualTo("[{\"productId\":10,\"stockQuantity\":10}]");
+        assertThat(STUB.adjustments()).last().isEqualTo("[{\"productId\":10,\"delta\":2}]");
+        assertThat(STUB.sellable(10)).isEqualTo(10);
+        assertThat(STUB.requests()).filteredOn(r -> r.startsWith("PUT /product"))
+            .allMatch(r -> r.endsWith("Bearer " + ADMIN_TOKEN));
 
         mockMvc.perform(get("/backoffice/stocks/histories").param("productId", "10")
                 .param("warehouseId", String.valueOf(main)).with(admin()))
@@ -123,8 +201,8 @@ class StockIT extends AbstractInventoryIT {
             .andExpect(status().isOk());
         assertThat(quantityOf(phone)).isEqualTo(4);
         assertThat(quantityOf(cable)).isEqualTo(6);
-        assertThat(STUB.quantityUpdates()).last()
-            .isEqualTo("[{\"productId\":10,\"stockQuantity\":4},{\"productId\":11,\"stockQuantity\":6}]");
+        assertThat(STUB.adjustments()).last()
+            .isEqualTo("[{\"productId\":10,\"delta\":4},{\"productId\":11,\"delta\":6}]");
         assertThat(count("stock_history")).isEqualTo(2);
     }
 
@@ -132,14 +210,14 @@ class StockIT extends AbstractInventoryIT {
     void adjust_toANegativeQuantity_isBadRequest_andNothingChanges() throws Exception {
         long stockId = addStock(10, main);
         adjust(stockId, 2, "in");
-        int updates = STUB.quantityUpdates().size();
+        int updates = STUB.adjustments().size();
 
         mockMvc.perform(put("/backoffice/stocks").with(admin()).contentType(MediaType.APPLICATION_JSON)
                 .content(adjustJson(stockId, -3L, "too many out")))
             .andExpect(status().isBadRequest());
         assertThat(quantityOf(stockId)).isEqualTo(2);
         assertThat(count("stock_history")).isEqualTo(1);
-        assertThat(STUB.quantityUpdates()).hasSize(updates);
+        assertThat(STUB.adjustments()).hasSize(updates);
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.shopapp.commonlibrary.model.AbstractAuditEntity;
 import com.shopapp.product.model.attribute.ProductAttributeValue;
 import com.shopapp.product.model.enumeration.DimensionUnit;
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -52,6 +53,11 @@ public class Product extends AbstractAuditEntity {
     private boolean isFeatured;
     private boolean isVisibleIndividually;
     private boolean stockTrackingEnabled;
+    /**
+     * Sellable stock. Never written from the entity (an edit saved from a stale copy would undo a concurrent order
+     * or adjustment): only the atomic updates of ProductRepository change it (decisions.md 3c-61).
+     */
+    @Column(updatable = false)
     private Long stockQuantity;
     private Long taxClassId;
     private String metaTitle;

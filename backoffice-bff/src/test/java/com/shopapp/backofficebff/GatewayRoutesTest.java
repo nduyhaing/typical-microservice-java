@@ -7,7 +7,9 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ReactiveClientRegistrationRepository;
@@ -37,6 +40,13 @@ class GatewayRoutesTest {
     private static final AtomicReference<String> BACKOFFICE_PATH = new AtomicReference<>();
     private static final HttpServer API = backend(API_PATH, API_AUTHORIZATION, "{\"name\":\"Apple\"}");
     private static final HttpServer BACKOFFICE = backend(BACKOFFICE_PATH, new AtomicReference<>(), "<html>admin</html>");
+
+    /** Product's order-only stock endpoints: reachable inside the compose network only (3c review I3). */
+    private static final List<String> STOCK_WRITES = List.of(
+        "/api/product/backoffice/products/subtract-quantity?reference=r-1",
+        "/api/product/backoffice/products/restore-quantity?reference=r-1",
+        "/api/product/backoffice/products/subtract%2Dquantity?reference=r-1",
+        "/api/product/backoffice/products/restore-quantity/");
 
     @Autowired
     private WebTestClient client;
@@ -107,6 +117,16 @@ class GatewayRoutesTest {
             .expectBody(String.class).isEqualTo("<html>admin</html>");
 
         assertThat(BACKOFFICE_PATH.get()).isEqualTo("/catalog/products");
+        assertThat(API_PATH.get()).isNull();
+    }
+
+    @Test
+    void stockWriteEndpoints_areRefused_evenForAnAdmin() {
+        for (String path : STOCK_WRITES) {
+            admin().put().uri(URI.create(path)).contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("[{\"productId\":1,\"quantity\":1}]").exchange()
+                .expectStatus().isForbidden();
+        }
         assertThat(API_PATH.get()).isNull();
     }
 

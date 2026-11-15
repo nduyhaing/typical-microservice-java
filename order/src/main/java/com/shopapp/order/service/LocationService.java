@@ -22,9 +22,11 @@ import org.springframework.web.client.RestClientException;
 
 /**
  * The order's shipping address from location (decisions.md 3c-35, 3c-41): a saved address is read with the
- * customer's token from GET /storefront/addresses/{id} (location answers 404 for another user's address, so nobody
- * can ship to someone else's address book); a typed address's country/state/district ids are checked against the
- * public lookups and their names taken from there. Location down is a 500.
+ * customer's token from GET /storefront/addresses/{id} and must be the caller's own: location answers 404 for
+ * another customer's address but shows an admin every address, so order also checks the owner ({@code createdBy},
+ * 3c-64) and nobody, not even an admin, ships to someone else's address book; a typed address's
+ * country/state/district ids are checked against the public lookups and their names taken from there. Location down
+ * is a 500.
  */
 @Slf4j
 @Service
@@ -40,7 +42,7 @@ public class LocationService {
         this.restClient = RestClients.withTimeouts(urls.location());
     }
 
-    /** One of the caller's saved addresses as an order address; 404 for unknown or someone else's. */
+    /** One of the caller's own saved addresses as an order address; 404 for unknown or someone else's. */
     public OrderAddress getSavedAddress(Long addressId) {
         LocationAddressVm address;
         try {
@@ -57,7 +59,8 @@ public class LocationService {
         } catch (RestClientException ex) {
             throw unavailable(ex);
         }
-        if (address == null || address.countryId() == null) {
+        if (address == null || address.countryId() == null
+            || !Objects.equals(address.createdBy(), AuthenticationUtils.extractUserId())) {
             throw new NotFoundException(Constants.ErrorCode.ADDRESS_NOT_FOUND, addressId);
         }
         return OrderAddress.builder()

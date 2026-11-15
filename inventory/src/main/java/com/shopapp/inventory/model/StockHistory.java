@@ -33,14 +33,19 @@ public class StockHistory extends AbstractAuditEntity {
     @Column(length = 450)
     private String note;
 
+    /** The reference the delta was sent to product under (decisions.md 3c-60). */
+    @Column(length = 64)
+    private String reference;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "warehouse_id", nullable = false)
     private Warehouse warehouse;
 
-    public StockHistory(Stock stock, long adjustedQuantity, String note) {
+    public StockHistory(Stock stock, long adjustedQuantity, String note, String reference) {
         this.productId = stock.getProductId();
         this.warehouse = stock.getWarehouse();
         this.adjustedQuantity = adjustedQuantity;
         this.note = note;
+        this.reference = reference;
     }
 }

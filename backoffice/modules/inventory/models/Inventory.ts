@@ -56,6 +56,8 @@ export type Stock = {
   quantity: number;
   reservedQuantity: number | null;
   warehouseId: number;
+  /** The product's sellable stock over all warehouses (null when product did not say). */
+  productStockQuantity: number | null;
 };
 
 /** StockQuantityVm: `quantity` is the adjustment (+/-), not the new quantity. */

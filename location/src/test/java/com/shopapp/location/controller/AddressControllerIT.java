@@ -119,7 +119,9 @@ class AddressControllerIT extends AbstractLocationIT {
             .andExpect(jsonPath("$.contactName").value("Bob"));
         mockMvc.perform(get(BASE + "/" + id).with(admin()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.contactName").value("Bob"));
+            .andExpect(jsonPath("$.contactName").value("Bob"))
+            // the owner, so order can refuse to ship an admin's order to it (3c-64)
+            .andExpect(jsonPath("$.createdBy").value("bob"));
     }
 
     @Test

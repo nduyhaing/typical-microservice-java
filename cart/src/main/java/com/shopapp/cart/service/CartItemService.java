@@ -48,9 +48,14 @@ public class CartItemService {
     @Transactional
     public CartItemGetVm updateCartItem(Long productId, CartItemPutVm cartItemPutVm) {
         ProductThumbnailVm product = validateProduct(productId);
-        requireStock(product, cartItemPutVm.quantity());
-
         String currentUserId = AuthenticationUtils.extractUserId();
+        int current = cartItemRepository.findByCustomerIdAndProductId(currentUserId, productId)
+            .map(CartItem::getQuantity).orElse(0);
+        // only an increase is checked: a line already above the stock can still be lowered (3c review I4)
+        if (cartItemPutVm.quantity() > current) {
+            requireStock(product, cartItemPutVm.quantity());
+        }
+
         CartItem cartItem = cartItemMapper.toCartItem(currentUserId, productId, cartItemPutVm.quantity());
 
         CartItem savedCartItem = cartItemRepository.save(cartItem);

@@ -10,13 +10,12 @@ import com.shopapp.inventory.repository.StockHistoryRepository;
 import com.shopapp.inventory.repository.StockRepository;
 import com.shopapp.inventory.utils.Constants.ErrorCode;
 import com.shopapp.inventory.viewmodel.product.ProductInfoVm;
-import com.shopapp.inventory.viewmodel.product.ProductQuantityPostVm;
+import com.shopapp.inventory.viewmodel.product.ProductQuantityDeltaVm;
 import com.shopapp.inventory.viewmodel.stock.StockPostVm;
 import com.shopapp.inventory.viewmodel.stock.StockQuantityUpdateVm;
 import com.shopapp.inventory.viewmodel.stock.StockQuantityVm;
 import com.shopapp.inventory.viewmodel.stock.StockVm;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -25,6 +24,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
@@ -32,9 +32,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Stock rows (YAS StockService). After every change the product service gets each affected product's total over all
- * warehouses (decisions.md 3c-25). That call is made inside the transaction, after the rows are written and before
- * the commit: when product fails, the transaction rolls back and nothing is saved (3c-27).
+ * Stock rows (YAS StockService). A warehouse quantity is what the warehouse physically holds; the product's stock
+ * quantity is what can still be sold (orders take from it). So an adjustment sends product only its change, summed
+ * per product, never the warehouse total, which would put back the units sold since (decisions.md 3c-60; YAS and
+ * 3c-25 sent the total). That call is made inside the transaction, after the rows are written and before the commit:
+ * when product fails, the transaction rolls back and nothing is saved (3c-27).
  */
 @Service
 @RequiredArgsConstructor
@@ -64,16 +66,22 @@ public class StockService {
         }
         Set<Long> productIds = new TreeSet<>();
         postVms.forEach(vm -> productIds.add(vm.productId()));
+        // one lookup for the whole list (3c review M3); a parent with options holds no stock and is not found
+        Map<Long, ProductInfoVm> products = productService.getProducts(productIds).stream()
+            .collect(Collectors.toMap(ProductInfoVm::id, Function.identity(), (first, second) -> first));
         for (Long productId : productIds) {
-            ProductInfoVm product = productService.getProduct(productId);
+            ProductInfoVm product = products.get(productId);
+            if (product == null) {
+                throw new NotFoundException(ErrorCode.PRODUCT_NOT_FOUND, productId);
+            }
             if (!Boolean.TRUE.equals(product.stockTrackingEnabled())) {
                 throw new BadRequestException(ErrorCode.PRODUCT_STOCK_TRACKING_DISABLED, productId);
             }
         }
+        // quantity 0: the sellable stock does not change, product is not called (3c-60)
         stockRepository.saveAllAndFlush(postVms.stream()
             .map(vm -> new Stock(vm.productId(), warehouses.get(vm.warehouseId())))
             .toList());
-        syncProductTotals(stockRepository.lockByProductIdIn(productIds));
     }
 
     /** The warehouse's stock rows whose product matches the name/sku search, with the product's name and sku. */
@@ -97,8 +105,9 @@ public class StockService {
     /**
      * Adds (or removes, when negative) units, all or nothing: an unknown stock is a 404, a stock listed twice or a
      * result below 0 a 400 (YAS checked {@code adjusted < 0 && adjusted > quantity}, which is never true). Each
-     * adjustment writes a history row with its note. Every stock row of the affected products is locked first, so
-     * concurrent adjustments cannot lose an update or report a stale total.
+     * adjustment writes a history row with its note and the call's reference. Product gets the change summed per
+     * product under that reference (products whose changes cancel out are left out). Every stock row of the affected
+     * products is locked first, so concurrent adjustments cannot lose an update.
      */
     @Transactional
     public void updateProductQuantityInStock(StockQuantityUpdateVm requestBody) {
@@ -112,7 +121,9 @@ public class StockService {
         List<Stock> lockedStocks = productIds.isEmpty() ? List.of() : stockRepository.lockByProductIdIn(productIds);
         Map<Long, Stock> stocksById = lockedStocks.stream()
             .collect(Collectors.toMap(Stock::getId, Function.identity()));
+        String reference = UUID.randomUUID().toString();
         List<StockHistory> histories = new ArrayList<>();
+        Map<Long, Long> deltas = new TreeMap<>();
         adjustments.forEach((stockId, vm) -> {
             Stock stock = stocksById.get(stockId);
             if (stock == null) {
@@ -123,22 +134,17 @@ public class StockService {
                 throw new BadRequestException(ErrorCode.INVALID_ADJUSTED_QUANTITY, stockId, vm.quantity());
             }
             stock.setQuantity(quantity);
-            histories.add(new StockHistory(stock, vm.quantity(), vm.note()));
+            histories.add(new StockHistory(stock, vm.quantity(), vm.note(), reference));
+            deltas.merge(stock.getProductId(), vm.quantity(), Long::sum);
         });
         stockHistoryRepository.saveAll(histories);
         stockRepository.flush();
-        syncProductTotals(lockedStocks);
-    }
-
-    /** Sends product the total quantity of each product found in {@code allStocksOfProducts}. */
-    private void syncProductTotals(Collection<Stock> allStocksOfProducts) {
-        Map<Long, Long> totals = new TreeMap<>();
-        allStocksOfProducts.forEach(stock -> totals.merge(stock.getProductId(), stock.getQuantity(), Long::sum));
-        if (totals.isEmpty()) {
-            return;
+        List<ProductQuantityDeltaVm> changes = deltas.entrySet().stream()
+            .filter(entry -> entry.getValue() != 0)
+            .map(entry -> new ProductQuantityDeltaVm(entry.getKey(), entry.getValue()))
+            .toList();
+        if (!changes.isEmpty()) {
+            productService.adjustProductQuantity(changes, reference);
         }
-        productService.updateProductQuantity(totals.entrySet().stream()
-            .map(entry -> new ProductQuantityPostVm(entry.getKey(), entry.getValue()))
-            .toList());
     }
 }

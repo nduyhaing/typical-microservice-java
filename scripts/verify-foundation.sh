@@ -226,6 +226,16 @@ check_address_book() {
     if [ "$status" = "200" ]; then pass "delete the saved address"; else fail "delete the saved address -> $status"; fi
 }
 
+# 3c review I3: product's order-only stock endpoints are reachable inside the compose network only.
+check_stock_endpoints_blocked() {
+    local origin op
+    origin="http://storefront.${DOMAIN}${BASE_URL_SUFFIX}"
+    for op in subtract restore; do
+        check_http "a signed-in customer cannot call $op-quantity through the BFF"             "$(url storefront "/api/product/backoffice/products/$op-quantity?reference=smoke-1")" 403             -b "$COOKIE_JAR" -H "Origin: $origin" -X PUT -H 'Content-Type: application/json'             -d '[{"productId":1,"quantity":1}]'
+        check_http "the API gateway refuses $op-quantity"             "$(url api "/product/backoffice/products/$op-quantity?reference=smoke-1")" 403             -X PUT -H 'Content-Type: application/json' -d '[{"productId":1,"quantity":1}]'
+    done
+}
+
 check_login_and_cart() {
     local base product_id violet_id
     base=$(url storefront "")
@@ -253,6 +263,7 @@ check_login_and_cart() {
     fi
     check_checkout_and_order "$violet_id"
     check_address_book
+    check_stock_endpoints_blocked
     curl -s -o /dev/null -b "$COOKIE_JAR" -X DELETE "$(url storefront "/api/cart/storefront/cart/items/$violet_id")" || true
     curl -s -o /dev/null -L -b "$COOKIE_JAR" -c "$COOKIE_JAR" -X POST "$(url storefront /logout)" || true
     if curl -s -b "$COOKIE_JAR" "$(url storefront /authentication)" | grep -q '"isAuthenticated":false'; then
