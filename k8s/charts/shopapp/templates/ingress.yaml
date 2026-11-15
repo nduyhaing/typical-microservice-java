@@ -23,6 +23,7 @@ spec:
 {{- end }}
 # api.<domain>: /<service>/ per service, like compose nginx. Plain Prefix paths only (no regex, no rewrite
 # annotation), so nginx picks the longest prefix: the refused paths below win over /<service>/.
+# k8s/scripts/check-edge-parity.sh (Charts CI) checks these against compose nginx (decisions.md 6-60).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -56,13 +57,27 @@ spec:
               {{- include "shopapp.backend" $deny | nindent 14 }}
           {{- end }}
           {{- end }}
+          # payment-paypal is internal only (5-22): 403 like compose, whether or not it is deployed
+          - path: /payment-paypal
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
           {{- range $svc := .Values.ingress.apiServices }}
           {{- if include "shopapp.enabled" (list $ $svc) }}
-          # actuator stays inside the cluster (probes, metrics scraping)
+          # service-to-service endpoints (realm role SERVICE) are called in-cluster only (5-5)
+          - path: /{{ $svc }}/internal
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+          # actuator stays inside the cluster (probes, metrics scraping); health stays public like compose (6-13)
           - path: /{{ $svc }}/actuator
             pathType: Prefix
             backend:
               {{- include "shopapp.backend" $deny | nindent 14 }}
+          - path: /{{ $svc }}/actuator/health
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list $svc 8080) | nindent 14 }}
           - path: /{{ $svc }}
             pathType: Prefix
             backend:
@@ -99,6 +114,10 @@ spec:
             pathType: Prefix
             backend:
               {{- include "shopapp.backend" $deny | nindent 14 }}
+          - path: /actuator/health
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list $bff.service $bff.port) | nindent 14 }}
           - path: /
             pathType: Prefix
             backend:

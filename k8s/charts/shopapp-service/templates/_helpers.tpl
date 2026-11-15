@@ -22,7 +22,9 @@ image:
   repository: ""
   # default global.imageTag, then the chart appVersion
   tag: ""
-  pullPolicy: IfNotPresent
+  # "" = Always for the moving tag "latest" (a node would otherwise keep its first copy), else IfNotPresent;
+  # CI also pushes <sha> tags per changed module: pin one with global.imageTag (decisions.md 6-67)
+  pullPolicy: ""
 # names of docker-registry Secrets; default global.imagePullSecrets
 imagePullSecrets: []
 port: 8080
@@ -157,6 +159,13 @@ resources:
 {{- $repository := $v.image.repository | default (printf "%s/%s%s" ($g.imageRegistry | default "ghcr.io/nduyhaing") $prefix $v.name) -}}
 {{- $tag := $v.image.tag | default $g.imageTag | default $root.Chart.AppVersion | default "latest" -}}
 {{- printf "%s:%s" $repository (toString $tag) -}}
+{{- end -}}
+
+{{/* image pull policy: image.pullPolicy, else Always for the tag "latest", else IfNotPresent */}}
+{{- define "shopapp-service.pullPolicy" -}}
+{{- $v := index . 0 -}}
+{{- $image := include "shopapp-service.image" . -}}
+{{- $v.image.pullPolicy | default (ternary "Always" "IfNotPresent" (hasSuffix ":latest" $image)) -}}
 {{- end -}}
 
 {{- define "shopapp-service.selectorLabels" -}}

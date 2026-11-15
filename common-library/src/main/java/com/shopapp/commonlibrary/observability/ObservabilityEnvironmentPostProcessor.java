@@ -40,6 +40,8 @@ public class ObservabilityEnvironmentPostProcessor implements EnvironmentPostPro
         // Kafka producer/consumer spans and trace context in record headers
         defaults.put("spring.kafka.template.observation-enabled", "true");
         defaults.put("spring.kafka.listener.observation-enabled", "true");
+        // trace ids in the MDC of reactive (WebFlux / gateway) log lines, also with export off (decisions.md 6-65)
+        defaults.put("spring.reactor.context-propagation", "auto");
 
         if (otlpConfigured(environment)) {
             defaults.put("management.otlp.metrics.export.step", "15s");
@@ -50,8 +52,6 @@ public class ObservabilityEnvironmentPostProcessor implements EnvironmentPostPro
             defaults.put("management.metrics.distribution.maximum-expected-value.http.server.requests", "10s");
             defaults.put("management.opentelemetry.tracing.export.otlp.connect-timeout", "2s");
             defaults.put("management.opentelemetry.logging.export.otlp.connect-timeout", "2s");
-            // trace ids in the MDC of reactive (WebFlux / gateway) log lines
-            defaults.put("spring.reactor.context-propagation", "auto");
         } else {
             defaults.put("management.otlp.metrics.export.enabled", "false");
         }

@@ -49,7 +49,7 @@ ingress:
     port: 8080
 
 # Replaces compose nginx's refused locations (stock subtract/restore 3c-63, coupon apply/release-usage 4-75,
-# actuator) and its "no services yet" fallback: the Ingress routes those paths to this tiny nginx, which answers
+# /<service>/internal 5-5, payment-paypal 5-22, actuator except health 6-13) and its "no services yet" fallback: the Ingress routes those paths to this tiny nginx, which answers
 # with the same status and JSON body. No snippet annotations needed (disabled by default in ingress-nginx).
 edgeDeny:
   image: nginxinc/nginx-unprivileged:1.30.6-alpine

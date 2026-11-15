@@ -11,8 +11,17 @@ server {
     location ~* ^/promotion/+storefront/+promotions/+(apply|release)-usage {
         return 403 '{{ $forbidden }}';
     }
-    location ~* ^/([^/]+/+)?actuator(/|$) {
-        return 404 '{"detail":"not found"}';
+    # /<service>/internal/... (service-to-service, realm role SERVICE) never through the edge (5-5)
+    location ~* ^/+[^/]+/+internal(/|$) {
+        return 403 '{{ $forbidden }}';
+    }
+    # actuator except health: /<service>/actuator... on api, /actuator... on the BFF hosts (6-13)
+    location ~* ^/+([^/]+/+)?actuator(?!/+health(/|$)) {
+        return 404 '{"statusCode":"404 NOT_FOUND","title":"Not Found","detail":"Not available through the gateway","fieldErrors":[]}';
+    }
+    # payment-paypal is internal only: the payment service calls it in-cluster (5-22)
+    location /payment-paypal/ {
+        return 403 '{{ $forbidden }}';
     }
     location / {
         return 404 '{"detail":"no services yet"}';

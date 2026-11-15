@@ -20,7 +20,15 @@ class ObservabilityEnvironmentPostProcessorTest {
         MockEnvironment environment = process(new MockEnvironment());
 
         assertThat(environment.getProperty("management.otlp.metrics.export.enabled")).isEqualTo("false");
-        assertThat(environment.getProperty("spring.reactor.context-propagation")).isNull();
+    }
+
+    /** BFF (WebFlux) console lines carry trace ids with the add-on off too (decisions.md 6-65). */
+    @Test
+    void always_propagatesReactorContextToThreadLocals() {
+        assertThat(process(new MockEnvironment()).getProperty("spring.reactor.context-propagation"))
+            .isEqualTo("auto");
+        assertThat(process(new MockEnvironment().withProperty("spring.reactor.context-propagation", "limited"))
+            .getProperty("spring.reactor.context-propagation")).isEqualTo("limited");
     }
 
     @Test

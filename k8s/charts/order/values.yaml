@@ -19,8 +19,8 @@ env:
   # token's issuer stays KEYCLOAK_URL) (decisions.md 5-5)
   SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
 secretEnv:
-  # service-to-service client of the order lifecycle (slice 5); optional until .env has it
+  # service-to-service client of the order lifecycle (slice 5); required: the pod does not start without it
+  # (decisions.md 6-66)
   ORDER_SERVICE_CLIENT_SECRET:
     secret: shopapp-keycloak-clients
     key: ORDER_SERVICE_CLIENT_SECRET
-    optional: true

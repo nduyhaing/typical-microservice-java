@@ -25,9 +25,23 @@ The system is built in slices; each ends in something that runs end to end.
 4. **Events & search** — Debezium CDC → Kafka, search (Elasticsearch) with a storefront search page, reviews (rating),
    coupons (promotion) at checkout *(done — slice 4 complete)*
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
-6. Operations: observability (OTel, Prometheus, Grafana, Loki, Tempo), Kubernetes, CI
+6. **Operations** — observability (OpenTelemetry → Prometheus, Loki, Tempo, Grafana; compose add-on), Kubernetes
+   (Helm charts, kind), CI (GitHub Actions, GHCR images, CodeQL, secret scan, Dependabot) *(done — slice 6 complete)*
 
 Designs and plans live in `docs/superpowers/`.
+
+### Project status
+
+All six slices are done (`decisions.md` has every decision, deviation from YAS and what was left out). Known limits:
+
+- **Local development only**: dev credentials in `.env` and the realm export, plain HTTP, one Postgres for all
+  services, single-node Kafka/Elasticsearch/Redis, no backups.
+- Observability is an opt-in compose add-on (~1.2 GB); the Helm charts do not deploy it. No JDBC spans, alerting,
+  Kafka Connect/Postgres metrics; CDC events start new traces.
+- Kubernetes: validated by Charts CI (lint, kubeconform, edge parity with compose nginx); the live kind run needs
+  ~6 GiB (core) to ~12 GiB (full) free next to compose (`k8s/README.md`). ingress-nginx is retired upstream; Gateway
+  API (NGINX Gateway Fabric) is the recommended move.
+- PayPal runs against the sandbox only; webhooks deliver CDC events, not domain events.
 
 ## Prerequisites
 
@@ -361,13 +375,31 @@ metrics to Prometheus (the services are not scraped; no host ports - only Grafan
 Export is asynchronous with bounded queues: when the collector is down, telemetry is dropped and requests are not
 affected. Calls between services are traced because the services build their RestClients with
 `ObservedRestClient.builder()` (use it for new clients too). Debezium CDC messages carry no trace context, so each
-consumed CDC event starts its own trace. Actuator requests are not traced, and `/<service>/actuator/**` other than
-`health` is blocked at nginx.
+consumed CDC event starts its own trace. Actuator requests are not traced (nor their Spring Security spans), and
+`/<service>/actuator/**` other than `health` is blocked at nginx. Outgoing-call spans keep the URL without its query
+string. A browser cannot pick the trace: the storefront, backoffice and identity hosts drop incoming `traceparent`,
+`tracestate` and `baggage` (the api host keeps them, the BFFs and services call it with their own). BFF console lines
+carry trace ids with the add-on off too (`spring.reactor.context-propagation=auto`).
 
 Memory: about **1.2-1.3 GB** on top of the stack - ~0.6 GB for the six add-on containers (Grafana, Prometheus,
 Tempo, Loki, collector, kafka-exporter; each has a memory limit) plus ~15-50 MB per exporting JVM. Turn it on only
 with that much free in the Docker VM: when the VM swaps, the backends time out and telemetry is dropped (the shop
 keeps working).
+
+## Kubernetes
+
+Helm charts for every workload (`k8s/charts`: a library chart, one thin chart per service/app, the umbrella
+`shopapp`), the infrastructure as manifests (`k8s/deploy`: CloudNativePG Postgres, Keycloak, Redis, Kafka + Connect,
+Elasticsearch) and a local kind cluster (decisions.md 6-20..6-37, 6-60..6-67). Details: `k8s/README.md`.
+
+```bash
+K8S_PROFILE=core bash scripts/k8s-up.sh   # slice 1-2 path (~6 GiB); without K8S_PROFILE the whole shop (~12 GiB)
+bash scripts/k8s-down.sh
+```
+
+The ingress (ingress-nginx) answers on `127.0.0.1:8000` with the compose hostnames
+(`http://storefront.shopapp.local:8000`), images come from GHCR (`K8S_IMAGES=local` uses the compose images). The
+edge refuses what compose nginx refuses; `k8s/scripts/check-edge-parity.sh` checks that in CI.
 
 ## Resources
 
@@ -419,16 +451,20 @@ GitHub Actions (`.github/workflows`), all on push and pull request to `master`:
 
 | Workflow | Runs when | What it does |
 |---|---|---|
-| **Backend CI** (`backend-ci.yml`) | a module's `src/`, `pom.xml` or `Dockerfile`, the root `pom.xml`, `checkstyle/**` or the backend CI files change | one job per touched Maven module (list read from the root pom; a change to `common-library`, the root pom, checkstyle or the CI files builds every module) running the reusable `maven-module.yml`: JDK 27 (Temurin), `mvn -pl <module> -am verify` (Checkstyle, unit tests, integration tests with Testcontainers on the runner's Docker), JaCoCo report artifact, test reports on failure |
+| **Backend CI** (`backend-ci.yml`) | a module's `src/`, `pom.xml` or `Dockerfile`, the root `pom.xml`, `checkstyle/**`, `docker/postgres/**` or the backend CI files change | one job per touched Maven module (list read from the root pom; a change to `common-library`, the root pom, checkstyle or the CI files builds every module; files a module reads from outside its directory - product's changelogs and `docker/postgres/sampledata*` for sampledata - select it too; `changed-modules.test.sh` tests that) running the reusable `maven-module.yml`: JDK 27 (Temurin), `mvn -pl <module> -am verify` (Checkstyle, unit tests, integration tests with Testcontainers on the runner's Docker), JaCoCo report artifact, test reports on failure |
 | **Storefront CI** / **Backoffice CI** | `storefront/**` / `backoffice/**` | reusable `node-app.yml` on Node 24: `npm ci`, lint, typecheck, test, build |
-| **Charts CI** (`charts-ci.yml`) | `k8s/**` | `helm lint` and `helm template \| kubeconform -strict -ignore-missing-schemas` for every chart in `k8s/charts` |
+| **Charts CI** (`charts-ci.yml`) | `k8s/**`, `nginx/**` | `k8s/scripts/validate-charts.sh` (`helm lint`, `helm template \| kubeconform -strict` for every chart, `values-core.yaml` and `k8s/deploy`) and `k8s/scripts/check-edge-parity.sh` (ingress vs compose nginx) |
 | **Secret scan** (`security.yml`) | every push/PR, nightly | gitleaks over the whole history (`.gitleaks.toml`: default rules; only the three documented dev Keycloak client secrets in `.env` and the realm export are allowed) |
 | **CodeQL** (`codeql.yml`) | every push/PR except docs, weekly | Java (Maven build) and JavaScript/TypeScript code scanning |
 
 Images: on push to `master`, after the module/app checks are green, the changed services and apps are built and
 pushed to `ghcr.io/nduyhaing/shopapp-<service>:<commit sha>` and `:latest` (`GITHUB_TOKEN`; never on pull requests).
-Dependabot (`.github/dependabot.yml`) opens weekly PRs for Maven, npm, GitHub Actions and the Dockerfile base images,
-with minor and patch updates grouped. Third-party actions are pinned to commit SHAs.
+Each master push runs on its own (pushes are never cancelled or dropped while queued; PR runs cancel superseded
+ones). Dependabot (`.github/dependabot.yml`) opens weekly PRs for Maven, npm, GitHub Actions, the Dockerfile base
+images, `k8s/deploy` and `docker-compose*.yml` images, with minor and patch updates grouped. Third-party actions are
+pinned to commit SHAs. CodeQL's `java/spring-disabled-csrf-protection` alerts are dismissed as false positives (BFFs:
+`CrossSiteRequestFilter`, decisions.md 2b-7; webhook: bearer tokens only). Run `gitleaks git` locally before pushing
+a new allowlisted dev secret (the scan checks the whole history on every push).
 
 ## Build notes
 

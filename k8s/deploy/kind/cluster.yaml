@@ -1,6 +1,8 @@
 # kind cluster for shop_app (scripts/k8s-up.sh). One node; ingress-nginx's kind manifest runs the controller on the
-# node labelled ingress-ready with hostPort 80, published on the host's loopback at K8S_HTTP_PORT (k8s-up.sh replaces
-# 8000). Loopback only, like compose: the dev credentials must not be reachable from the LAN.
+# node labelled ingress-ready with a hostPort. k8s-up.sh moves the controller to the public port K8S_HTTP_PORT
+# (--http-port, containerPort and hostPort; it replaces 8000 below), so the port browsers use is the port nginx
+# listens on and X-Forwarded-Port matches the browser's URL (decisions.md 6-61). Published on the host's loopback
+# only, like compose: the dev credentials must not be reachable from the LAN.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -8,7 +10,7 @@ nodes:
     labels:
       ingress-ready: "true"
     extraPortMappings:
-      - containerPort: 80
+      - containerPort: 8000
         hostPort: 8000
         listenAddress: "127.0.0.1"
         protocol: TCP

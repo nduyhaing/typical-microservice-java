@@ -3,7 +3,8 @@
 #   usage: changed-modules.sh <base-sha> <head-sha>
 # Every module is selected when the base is unknown (new branch, first push, manual run) or when a shared input
 # changed: the root pom, checkstyle rules, common-library (all services depend on it) or the backend CI files.
-# The module list is read from the root pom, so new modules are picked up without editing the workflow.
+# The module list is read from the root pom, so new modules are picked up without editing the workflow. A module is
+# also selected when one of its external inputs changed (extra_inputs below). Tests: changed-modules.test.sh.
 set -euo pipefail
 
 base="${1:-}"
@@ -32,8 +33,18 @@ if printf '%s\n' "$changed" | grep -qE "$shared"; then
   exit 0
 fi
 
+# Inputs a module reads from outside its own directory (its pom's <resources>/<testResources> with ../),
+# as "<path regex>|<module>" (decisions.md 6-69). Keep in sync when a pom gains another ../ resource.
+extra_inputs=(
+  '^product/src/main/resources/db/|sampledata'   # product's changelogs + seed (sampledata/pom.xml)
+  '^docker/postgres/sampledata|sampledata'       # the sampledata login's grants (sampledata ITs)
+)
+
 for m in $modules; do
-  if printf '%s\n' "$changed" | grep -q "^${m}/"; then
-    echo "$m"
-  fi
+  selected=false
+  if printf '%s\n' "$changed" | grep -q "^${m}/"; then selected=true; fi
+  for entry in "${extra_inputs[@]}"; do
+    if [ "${entry##*|}" = "$m" ] && printf '%s\n' "$changed" | grep -qE "${entry%|*}"; then selected=true; fi
+  done
+  if "$selected"; then echo "$m"; fi
 done | to_json

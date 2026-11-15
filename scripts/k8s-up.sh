@@ -46,7 +46,8 @@ step "kind cluster $CLUSTER (ingress on 127.0.0.1:$HTTP_PORT)"
 if kind get clusters 2> /dev/null | grep -qx "$CLUSTER"; then
     echo "exists"
 else
-    sed "s/hostPort: 8000/hostPort: $HTTP_PORT/" k8s/deploy/kind/cluster.yaml > "$TMP/cluster.yaml"
+    sed -e "s/hostPort: 8000/hostPort: $HTTP_PORT/" -e "s/containerPort: 8000/containerPort: $HTTP_PORT/" \
+        k8s/deploy/kind/cluster.yaml > "$TMP/cluster.yaml"
     kind create cluster --name "$CLUSTER" --config "$TMP/cluster.yaml" --wait 120s
 fi
 kubectl config use-context "kind-$CLUSTER" > /dev/null
@@ -57,6 +58,18 @@ $KC apply -f "https://raw.githubusercontent.com/kubernetes/ingress-nginx/$INGRES
 sed "s/port: 8000/port: $HTTP_PORT/" k8s/deploy/ingress-nginx.yaml | $KC apply -f - > /dev/null
 $KC -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
     -p '{"data":{"proxy-set-headers":"ingress-nginx/shopapp-proxy-headers"}}' > /dev/null
+# The controller listens on the public port itself (kind maps host:PORT -> node:PORT -> hostPort PORT), so
+# X-Forwarded-Port is the browser's port: the BFFs (forward-headers-strategy framework) build their login redirect
+# URIs from it, and with the kind manifest's port 80 they pointed at :80 (decisions.md 6-61)
+if ! $KC -n ingress-nginx get deployment ingress-nginx-controller \
+    -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q -- '--http-port='; then
+    c=/spec/template/spec/containers/0
+    $KC -n ingress-nginx patch deployment ingress-nginx-controller --type json -p "[
+        {\"op\": \"test\", \"path\": \"$c/ports/0/name\", \"value\": \"http\"},
+        {\"op\": \"add\", \"path\": \"$c/args/-\", \"value\": \"--http-port=$HTTP_PORT\"},
+        {\"op\": \"replace\", \"path\": \"$c/ports/0/containerPort\", \"value\": $HTTP_PORT},
+        {\"op\": \"replace\", \"path\": \"$c/ports/0/hostPort\", \"value\": $HTTP_PORT}]" > /dev/null
+fi
 $KC -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=300s
 
 step "CoreDNS: *.$DOMAIN -> ingress (pods use the public URLs, like compose's nginx aliases)"

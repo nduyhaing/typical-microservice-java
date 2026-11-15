@@ -5,6 +5,9 @@
 #    overwrites X-Forwarded-For/-Host/-Proto/-Port (use-forwarded-headers is off by default); these two it would pass
 #    through. Set through the controller's proxy-set-headers option, not a snippet (k8s-up.sh points the controller
 #    ConfigMap at this one).
+#    W3C trace context (traceparent, tracestate, baggage) is NOT cleared here, unlike compose's browser-only hosts
+#    (decisions.md 6-62): this option applies to every host, and the BFFs and services reach api.<domain> through
+#    this same controller, so clearing it would cut every BFF -> service trace.
 apiVersion: v1
 kind: ConfigMap
 metadata:

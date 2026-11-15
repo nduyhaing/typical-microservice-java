@@ -5,6 +5,9 @@ import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.filter.Filter;
 import ch.qos.logback.core.spi.FilterReply;
+import io.micrometer.common.KeyValue;
+import io.micrometer.observation.Observation;
+import io.micrometer.observation.ObservationFilter;
 import io.micrometer.observation.ObservationPredicate;
 import io.micrometer.observation.ObservationRegistry;
 import io.opentelemetry.api.OpenTelemetry;
@@ -19,6 +22,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.observation.ClientRequestObservationContext;
 import org.springframework.http.server.observation.ServerRequestObservationContext;
 
 /**
@@ -37,6 +41,27 @@ import org.springframework.http.server.observation.ServerRequestObservationConte
 })
 public class ObservabilityAutoConfiguration {
 
+    /**
+     * Outgoing calls (RestClient): the span's {@code http.url} keeps scheme, host and path but not the query string,
+     * which can carry search terms, emails or ids (decisions.md 6-64). The low-cardinality {@code uri} is a template.
+     */
+    static final ObservationFilter CLIENT_URL_WITHOUT_QUERY = context -> {
+        if (context instanceof ClientRequestObservationContext) {
+            KeyValue url = context.getHighCardinalityKeyValue("http.url");
+            if (url != null && url.getValue().indexOf('?') >= 0) {
+                context.addHighCardinalityKeyValue(
+                    KeyValue.of(url.getKey(), url.getValue().substring(0, url.getValue().indexOf('?'))));
+            }
+        }
+        return context;
+    };
+
+    @Bean
+    @ConditionalOnClass(name = "org.springframework.http.client.observation.ClientRequestObservationContext")
+    ObservationFilter clientUrlWithoutQueryObservationFilter() {
+        return CLIENT_URL_WITHOUT_QUERY;
+    }
+
     @Bean
     ObservedRestClientBinding observedRestClientBinding(ObjectProvider<ObservationRegistry> registry) {
         return new ObservedRestClientBinding(registry);
@@ -51,9 +76,24 @@ public class ObservabilityAutoConfiguration {
             !(context instanceof ServerRequestObservationContext servlet)
                 || !servlet.getCarrier().getRequestURI().contains("/actuator");
 
+        /**
+         * Spring Security's observations (filter chain, authentication, authorization) of a request whose
+         * http.server.requests observation was dropped above have no (or a no-op) parent and would each become a
+         * root span: dropped too (decisions.md 6-63). Servlet only: WebFlux's security decorator sets the parent
+         * after the predicates ran, so there every security observation would look parentless.
+         */
+        static final ObservationPredicate NO_ORPHAN_SECURITY = (name, context) ->
+            !name.startsWith("spring.security.")
+                || context.getParentObservation() instanceof Observation parent && !parent.isNoop();
+
         @Bean
         ObservationPredicate servletActuatorObservationFilter() {
             return NOT_ACTUATOR;
+        }
+
+        @Bean
+        ObservationPredicate servletOrphanSecurityObservationFilter() {
+            return NO_ORPHAN_SECURITY;
         }
     }
 

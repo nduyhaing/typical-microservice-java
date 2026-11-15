@@ -30,12 +30,24 @@ updates:
       actions-minor-patch:
         update-types: [minor, patch]
 
-  # every top-level directory with a Dockerfile (services and apps)
+  # every top-level directory with a Dockerfile (services and apps), and the Kubernetes manifests of k8s/deploy
+  # (the docker ecosystem also reads image tags in Kubernetes manifests, decisions.md 6-72)
   - package-ecosystem: docker
     directories:
       - '/*'
+      - '/k8s/deploy'
     schedule:
       interval: weekly
     groups:
       docker-minor-patch:
+        update-types: [minor, patch]
+
+  # image tags pinned in docker-compose*.yml (Postgres, Keycloak, Kafka, Elasticsearch, the observability add-on);
+  # chart values (edge-deny image) follow by hand (decisions.md 6-72)
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      compose-minor-patch:
         update-types: [minor, patch]

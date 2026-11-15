@@ -15,6 +15,7 @@ k8s/
   scripts/
     make-secrets.sh    Kubernetes Secrets from .env
     validate-charts.sh helm lint + helm template | kubeconform (also run by CI)
+    check-edge-parity.sh  the ingress refuses/routes what compose nginx does (also run by CI)
     new-service-chart.sh  thin chart for a new service
 scripts/k8s-up.sh, scripts/k8s-down.sh   local kind cluster
 ```
@@ -34,6 +35,9 @@ bash scripts/k8s-down.sh                     # delete the cluster and all its da
 The ingress listens on `127.0.0.1:8000` (`K8S_HTTP_PORT`; compose's nginx already has port 80), so the shop is at
 `http://storefront.shopapp.local:8000`, the back office at `http://backoffice.shopapp.local:8000` (admin / admin)
 and Keycloak at `http://identity.shopapp.local:8000`. With compose stopped, `K8S_HTTP_PORT=80` gives the plain URLs.
+The controller itself listens on that port (`--http-port`, containerPort and hostPort; kind maps the same port), so
+the `X-Forwarded-Port` it sends is the browser's port and the BFFs build their login redirect URIs with it
+(decisions.md 6-61).
 
 `k8s-up.sh` creates the cluster, installs ingress-nginx (`controller-v1.15.1`, kind manifest) and the CloudNativePG
 operator (1.30.1), creates the namespace `shopapp`, the Secrets (from `.env`) and ConfigMaps (from the repository's
@@ -70,7 +74,9 @@ top of compose's ~7.5 GB, so on a 16 GB Docker VM stop compose first or use the 
   Each service's wiring (which services it calls) stays in its thin chart so a thin chart installs alone; override
   anything under the service's key, e.g. `--set product.env.SPRING_LIQUIBASE_CONTEXTS=default`.
 * **Images**: `ghcr.io/nduyhaing/shopapp-<service>:<global.imageTag>` (default `latest`); `K8S_IMAGES=local` switches
-  to `shopapp/<service>:dev` and loads them into kind. CI publishes `:<sha>` and `:latest` from master; **GHCR
+  to `shopapp/<service>:dev` and loads them into kind. CI publishes `:<sha>` and `:latest` from master. With `latest`
+  the pods pull `Always` (else `IfNotPresent`; `image.pullPolicy` overrides); the `<sha>` tags exist only for the
+  modules a commit changed, so pin a per-service `<service>.image.tag` rather than one `global.imageTag`. **GHCR
   packages are private by default**, so either the owner makes them public or `k8s-up.sh` gets
   `GHCR_USER` + `GHCR_TOKEN` (a token with `read:packages`) and creates the docker-registry Secret `ghcr-pull`, which
   the charts use through `global.imagePullSecrets` (per workload: `<service>.imagePullSecrets`).
@@ -82,11 +88,15 @@ ingress-nginx with the compose hostnames: `identity.<domain>` → Keycloak, `api
 (optional). Same buffer size (128k) and upload limit (11m on api and backoffice) as compose nginx.
 
 **Edge blocks without snippets.** Compose nginx refuses some paths itself: product's stock `subtract-quantity` /
-`restore-quantity` (3c-63), promotion's coupon `apply-usage` / `release-usage` (4-75) and actuator. ingress-nginx
+`restore-quantity` (3c-63), promotion's coupon `apply-usage` / `release-usage` (4-75), `/<service>/internal/...`
+(service-to-service, 5-5), `/payment-paypal/` (5-22) and actuator except `health` (6-13). ingress-nginx
 disables `server-snippet` / `configuration-snippet` annotations by default (`allow-snippet-annotations: false`,
 and they are rated critical risk), so instead the Ingress routes exactly those paths (plain `Prefix` paths, longest
 prefix wins over `/<service>`) and every unknown path to **edge-deny**, a 16 MiB nginx in the chart that answers with
-compose's status and JSON body (403 `Not available through the API gateway`, 404 for actuator and unknown paths).
+compose's status and JSON body (403 `Not available through the API gateway`, 404 for actuator and unknown paths);
+`/<service>/actuator/health` (and the BFFs' `/actuator/health`) is routed to the service, like compose.
+`k8s/scripts/check-edge-parity.sh` (Charts CI) emulates both edges' routing for every service's normal, internal,
+actuator and health paths and fails when the chart and `nginx/templates/default.conf.template` disagree.
 No regex or rewrite annotation is used anywhere, because one on a host would switch all its paths to
 case-insensitive regex matching. nginx merges repeated slashes before matching, and Spring's matching is
 case-sensitive, so `//product//backoffice/...` is refused and `/Product/...` reaches nothing.
@@ -94,10 +104,15 @@ case-sensitive, so `//product//backoffice/...` is refused and `/Product/...` rea
 **Forwarded headers.** ingress-nginx overwrites `X-Forwarded-For/-Host/-Proto/-Port` (`use-forwarded-headers` is off);
 `Forwarded` and `X-Forwarded-Prefix`, which it would pass through, are cleared with the controller's
 `proxy-set-headers` ConfigMap (`k8s/deploy/ingress-nginx.yaml`), like compose's `proxy_set_header ... ""`.
+Browser-supplied `traceparent`/`tracestate`/`baggage` are cleared by compose's storefront, backoffice and identity
+hosts but **not** here: that option is global, and the BFFs and services call `api.<domain>` through the same
+controller, so clearing it would cut every BFF → service trace (decisions.md 6-62).
 
 **ingress-nginx is retired** (no releases after March 2026); it is used because the spec asks for it and because
 compose's routing maps onto it one to one. The Ingresses contain nothing controller-specific except two annotations,
 so moving to another controller (or Gateway API HTTPRoutes) means replacing those annotations and `ingress.className`.
+Recommended next step: Gateway API with NGINX Gateway Fabric (HTTPRoute path matches cover the edge-deny paths;
+per-route request header filters can clear the trace headers on the browser hosts only).
 
 ## DNS: pods use the public URLs
 
@@ -130,7 +145,8 @@ filesystem; the shop's own pods do not.
 `k8s/scripts/make-secrets.sh [.env] [namespace]` creates `shopapp-postgres`, `shopapp-keycloak-admin`,
 `shopapp-keycloak-clients`, `shopapp-debezium`, `shopapp-sampledata-db` and `shopapp-elasticsearch` from `.env`
 (values passed to kubectl as files, not arguments). Charts and manifests only reference them; nothing beyond the
-dev defaults in `.env` is committed.
+dev defaults in `.env` is committed. `ORDER_SERVICE_CLIENT_SECRET` and `PAYMENT_SERVICE_CLIENT_SECRET` are required:
+the script stops without them and the order/payment pods do not start (decisions.md 6-66).
 
 ## Validation
 
@@ -142,6 +158,13 @@ Builds the chart dependencies, runs `helm lint` on every chart (umbrella also wi
 and validates the output and `k8s/deploy/*.yaml` with `kubeconform -strict` (CloudNativePG's `Cluster` against its
 CRD schema from the datreeio CRDs-catalog).
 
+```bash
+bash k8s/scripts/check-edge-parity.sh   # PYTHON=python on Windows
+```
+
+Compares the rendered ingress + edge-deny with compose nginx (216 probes) and checks that compose's browser hosts
+drop trace headers. Both run in Charts CI, which also runs on `nginx/**` changes.
+
 ## Adding a service
 
 `bash k8s/scripts/new-service-chart.sh <name>`, add its env (compare `docker-compose.yml`), add it to the umbrella's
@@ -152,7 +175,7 @@ the core path), then run the validation.
 
 * `kubectl -n shopapp get pods`, `kubectl -n shopapp logs deploy/<service>`, `kubectl -n shopapp describe pod ...`
 * A service restarts at start: its startup probe ran out (slow node) - raise `<service>.probes.startupFailureThreshold`.
-* Login redirects to port 80: `K8S_HTTP_PORT` changed after Keycloak imported the realm; delete the cluster
-  (`scripts/k8s-down.sh`) and start again.
+* Login redirects to port 80: `K8S_HTTP_PORT` changed after the cluster (or Keycloak's realm import) was created; the
+  kind port mapping is fixed at creation, so delete the cluster (`scripts/k8s-down.sh`) and start again.
 * Connector status: `kubectl -n shopapp exec deploy/kafka-connect -- curl -s localhost:8083/connectors?expand=status`.
 * Postgres: `kubectl -n shopapp exec -it shopapp-postgres-1 -- psql -U postgres`.

@@ -1,4 +1,5 @@
-# Charts CI: helm lint and schema validation (helm template | kubeconform -strict) of every chart under k8s/charts.
+# Charts CI: k8s/scripts/validate-charts.sh (helm lint, helm template | kubeconform -strict of every chart and of
+# k8s/deploy) and k8s/scripts/check-edge-parity.sh (the ingress matches compose nginx's edge rules).
 # Skips with a notice while the directory does not exist.
 name: Charts CI
 
@@ -7,11 +8,13 @@ on:
     branches: [master]
     paths:
       - 'k8s/**'
+      - 'nginx/**'
       - '.github/workflows/charts-ci.yml'
   pull_request:
     branches: [master]
     paths:
       - 'k8s/**'
+      - 'nginx/**'
       - '.github/workflows/charts-ci.yml'
   workflow_dispatch:
 
@@ -60,23 +63,13 @@ jobs:
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
           sudo install /tmp/kubeconform /usr/local/bin/kubeconform
 
-      - name: helm lint + kubeconform
+      # the same script as by hand: dependencies, helm lint (umbrella also with values-core.yaml), kubeconform of the
+      # charts and of k8s/deploy, CloudNativePG Cluster against its CRD schema (decisions.md 6-36, 6-70)
+      - name: Validate charts and k8s/deploy
         if: ${{ steps.charts.outputs.present == 'true' }}
-        run: |
-          status=0
-          # library charts cannot be rendered on their own; they are validated through the charts that use them
-          for chart in $(find k8s/charts -name Chart.yaml -not -path '*/charts/*/charts/*' -exec dirname {} \; | sort); do
-            echo "::group::${chart}"
-            if grep -q '^dependencies:' "${chart}/Chart.yaml"; then
-              helm dependency build "${chart}" || status=1
-            fi
-            helm lint "${chart}" || status=1
-            if grep -qE '^type:[[:space:]]*library' "${chart}/Chart.yaml"; then
-              echo "library chart - template rendering skipped"
-            else
-              helm template ci "${chart}" \
-                | kubeconform -strict -ignore-missing-schemas -summary || status=1
-            fi
-            echo "::endgroup::"
-          done
-          exit $status
+        run: bash k8s/scripts/validate-charts.sh
+
+      # the k8s edge refuses and routes what compose nginx does (decisions.md 6-60)
+      - name: Edge parity with compose nginx
+        if: ${{ steps.charts.outputs.present == 'true' }}
+        run: bash k8s/scripts/check-edge-parity.sh

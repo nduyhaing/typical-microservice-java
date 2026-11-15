@@ -12,9 +12,10 @@ on:
       - '*/Dockerfile'
       - 'pom.xml'
       - 'checkstyle/**'
+      - 'docker/postgres/**'
       - '.github/workflows/backend-ci.yml'
       - '.github/workflows/maven-module.yml'
-      - '.github/scripts/changed-modules.sh'
+      - '.github/scripts/changed-modules*.sh'
   pull_request:
     branches: [master]
     paths:
@@ -23,18 +24,20 @@ on:
       - '*/Dockerfile'
       - 'pom.xml'
       - 'checkstyle/**'
+      - 'docker/postgres/**'
       - '.github/workflows/backend-ci.yml'
       - '.github/workflows/maven-module.yml'
-      - '.github/scripts/changed-modules.sh'
+      - '.github/scripts/changed-modules*.sh'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 # PR runs are cumulative (base..head), so a newer push supersedes the older run. Push runs on master only cover
-# before..sha, so they are queued, not cancelled - cancelling one would leave its modules unverified.
+# before..sha, so each push gets its own group: GitHub keeps only one *pending* run per group and cancels the
+# others even without cancel-in-progress, which silently left modules unverified (decisions.md 6-68).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -49,6 +52,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Test the module detection
+        run: bash .github/scripts/changed-modules.test.sh
       - id: detect
         name: Detect changed modules
         env:

@@ -13,7 +13,7 @@ env:
   # its own client-credentials token, straight to Keycloak (the token's issuer stays KEYCLOAK_URL)
   SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
 secretEnv:
+  # required: the pod does not start without it (decisions.md 6-66)
   PAYMENT_SERVICE_CLIENT_SECRET:
     secret: shopapp-keycloak-clients
     key: PAYMENT_SERVICE_CLIENT_SECRET
-    optional: true

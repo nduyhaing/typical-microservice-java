@@ -52,7 +52,7 @@ spec:
       containers:
         - name: {{ $v.name }}
           image: {{ include "shopapp-service.image" (list $v $root) | quote }}
-          imagePullPolicy: {{ $v.image.pullPolicy }}
+          imagePullPolicy: {{ include "shopapp-service.pullPolicy" (list $v $root) }}
           securityContext:
             {{- toYaml $v.securityContext | nindent 12 }}
           ports:
