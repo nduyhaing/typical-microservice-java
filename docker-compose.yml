@@ -170,7 +170,7 @@ services:
   # one-shot: replication user, grants and publications in the product and order DBs (idempotent; needs their
   # tables) (decisions.md 4-3, 5-7)
   debezium-db-init:
-    image: postgres:16.16
+    image: postgres:18.6
     command: ["sh", "-c", "psql -q -h postgres -U \"$$PGUSER\" -d product -f /sql/debezium-user.sql && psql -q -h postgres -U \"$$PGUSER\" -d order -f /sql/debezium-order.sql"]
     environment:
       PGUSER: ${POSTGRES_USER}
@@ -627,7 +627,7 @@ services:
   # one-shot: the "sampledata" login and its catalog-only grants in the product DB (idempotent; needs product's
   # tables) (decisions.md 5-53)
   sampledata-db-init:
-    image: postgres:16.16
+    image: postgres:18.6
     command: ["psql", "-q", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "product", "-f", "/sql/sampledata-user.sql"]
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD}
