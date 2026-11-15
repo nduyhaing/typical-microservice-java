@@ -59,7 +59,10 @@ public class ProductDetailService {
             product.isHasOptions(),
             product.getPrice(),
             MediaService.urlOf(urls, product.getThumbnailMediaId()),
-            imageUrls);
+            imageUrls,
+            product.isStockTrackingEnabled(),
+            product.stockAvailable(),
+            product.trackedStockQuantity());
     }
 
     public List<ProductVariationGetVm> getProductVariationsByParentId(Long id) {

@@ -120,12 +120,14 @@ public class ProductService {
 
     private ProductThumbnailGetVm toThumbnailGetVm(Product product, Map<Long, String> urls) {
         return new ProductThumbnailGetVm(product.getId(), product.getName(), product.getSlug(),
-            MediaService.urlOf(urls, product.getThumbnailMediaId()), product.getPrice());
+            MediaService.urlOf(urls, product.getThumbnailMediaId()), product.getPrice(),
+            product.isStockTrackingEnabled(), product.stockAvailable(), product.trackedStockQuantity());
     }
 
     private ProductThumbnailVm toThumbnailVm(Product product, Map<Long, String> urls) {
         return new ProductThumbnailVm(product.getId(), product.getName(), product.getSlug(),
-            MediaService.urlOf(urls, product.getThumbnailMediaId()));
+            MediaService.urlOf(urls, product.getThumbnailMediaId()),
+            product.isStockTrackingEnabled(), product.stockAvailable(), product.trackedStockQuantity());
     }
 
     /** Thumbnail URLs of a page of products with one media-service call (decisions.md 3b-10). */

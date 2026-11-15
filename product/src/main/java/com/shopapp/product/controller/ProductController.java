@@ -1,18 +1,23 @@
 package com.shopapp.product.controller;
 
+import com.shopapp.product.model.enumeration.FilterExistInWhSelection;
 import com.shopapp.product.service.ProductAdminService;
 import com.shopapp.product.service.ProductDetailService;
 import com.shopapp.product.service.ProductService;
+import com.shopapp.product.service.ProductStockService;
 import com.shopapp.product.viewmodel.product.ProductDetailGetVm;
 import com.shopapp.product.viewmodel.product.ProductDetailVm;
 import com.shopapp.product.viewmodel.product.ProductFeatureGetVm;
 import com.shopapp.product.viewmodel.product.ProductGetCheckoutListVm;
 import com.shopapp.product.viewmodel.product.ProductGetDetailVm;
+import com.shopapp.product.viewmodel.product.ProductInfoVm;
 import com.shopapp.product.viewmodel.product.ProductListGetFromCategoryVm;
 import com.shopapp.product.viewmodel.product.ProductListGetVm;
 import com.shopapp.product.viewmodel.product.ProductListVm;
 import com.shopapp.product.viewmodel.product.ProductPostVm;
 import com.shopapp.product.viewmodel.product.ProductPutVm;
+import com.shopapp.product.viewmodel.product.ProductQuantityPostVm;
+import com.shopapp.product.viewmodel.product.ProductQuantityPutVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailGetVm;
 import com.shopapp.product.viewmodel.product.ProductThumbnailVm;
 import com.shopapp.product.viewmodel.product.ProductVariationGetVm;
@@ -21,6 +26,8 @@ import com.shopapp.product.viewmodel.productoption.ProductOptionCombinationGetVm
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -48,10 +55,15 @@ public class ProductController {
     static final long MAX_PAGE_NO = 10_000_000;
     /** Bounds the work one request can trigger (one media lookup per product once media exists). */
     static final long MAX_PAGE_SIZE = 100;
+    /** At most this many items per stock quantity call. */
+    static final int MAX_QUANTITY_ITEMS = 100;
+    /** A subtract/restore reference: 1..64 letters, digits, '-' or '_' (decisions.md 3c-22). */
+    static final String REFERENCE_PATTERN = "^[A-Za-z0-9_-]{1,64}$";
 
     private final ProductService productService;
     private final ProductDetailService productDetailService;
     private final ProductAdminService productAdminService;
+    private final ProductStockService productStockService;
 
     @GetMapping("/backoffice/products")
     public ResponseEntity<ProductListGetVm> listProducts(
@@ -177,5 +189,45 @@ public class ProductController {
         @RequestParam(value = "pageSize", defaultValue = "5", required = false)
         @Min(1) @Max(MAX_PAGE_SIZE) int pageSize) {
         return ResponseEntity.ok(productService.getRelatedProductsStorefront(id, pageNo, pageSize));
+    }
+
+    /** YAS: the inventory service sets each product's stock quantity (its total over all warehouses). ADMIN. */
+    @PutMapping(path = "/backoffice/products/update-quantity", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> updateProductQuantity(
+        @Valid @RequestBody @NotEmpty @Size(max = MAX_QUANTITY_ITEMS) List<ProductQuantityPostVm> items) {
+        productStockService.updateProductQuantity(items);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * YAS: the order service takes stock with the customer's token, so any signed-in user may call it; it only
+     * decreases, atomically, all or nothing (decisions.md 3c-21). {@code reference} (optional) records the units for
+     * {@link #restoreProductQuantity(String)}.
+     */
+    @PutMapping(path = "/backoffice/products/subtract-quantity", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Void> subtractProductQuantity(
+        @Valid @RequestBody @NotEmpty @Size(max = MAX_QUANTITY_ITEMS) List<ProductQuantityPutVm> items,
+        @RequestParam(value = "reference", required = false) @Pattern(regexp = REFERENCE_PATTERN) String reference) {
+        productStockService.subtractStockQuantity(items, reference);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Order compensation: gives back, once, what the same caller took under {@code reference} (3c-22). */
+    @PutMapping("/backoffice/products/restore-quantity")
+    public ResponseEntity<Void> restoreProductQuantity(
+        @RequestParam("reference") @Pattern(regexp = REFERENCE_PATTERN) String reference) {
+        productStockService.restoreStockQuantity(reference);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** YAS: the inventory service's product lookup (search and in / not in a warehouse's product ids). ADMIN. */
+    @GetMapping("/backoffice/products/for-warehouse")
+    public ResponseEntity<List<ProductInfoVm>> getProductsForWarehouse(
+        @RequestParam(value = "name", defaultValue = "", required = false) String name,
+        @RequestParam(value = "sku", defaultValue = "", required = false) String sku,
+        @RequestParam(value = "productIds", required = false) List<Long> productIds,
+        @RequestParam(value = "selection", defaultValue = "ALL", required = false)
+        FilterExistInWhSelection selection) {
+        return ResponseEntity.ok(productStockService.getProductsForWarehouse(name, sku, productIds, selection));
     }
 }

@@ -284,6 +284,29 @@ services:
     networks:
       - shopapp-network
 
+  inventory:
+    build: ./inventory
+    image: shopapp/inventory:dev
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/inventory
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      # straight to the containers, with the admin's token (decisions.md 3c-28)
+      SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+      SHOPAPP_SERVICES_LOCATION: http://location:8080/location
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /inventory/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
   redis:
     image: redis:7.4.12-alpine
     healthcheck:
@@ -416,6 +439,8 @@ services:
       tax:
         condition: service_healthy
       location:
+        condition: service_healthy
+      inventory:
         condition: service_healthy
       storefront-bff:
         condition: service_healthy

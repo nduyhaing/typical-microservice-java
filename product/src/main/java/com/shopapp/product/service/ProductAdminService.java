@@ -113,6 +113,7 @@ public class ProductAdminService {
             .isFeatured(product.isFeatured())
             .isVisible(product.isVisibleIndividually())
             .stockTrackingEnabled(product.isStockTrackingEnabled())
+            .stockQuantity(product.getStockQuantity())
             .weight(product.getWeight())
             .dimensionUnit(product.getDimensionUnit())
             .length(product.getLength())

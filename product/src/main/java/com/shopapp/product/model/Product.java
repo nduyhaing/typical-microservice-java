@@ -86,6 +86,19 @@ public class Product extends AbstractAuditEntity {
     private List<Product> products = new ArrayList<>();
     private boolean taxIncluded;
 
+    /** Storefront availability: not stock-tracked, or at least one unit left (decisions.md 3c-24). */
+    public boolean stockAvailable() {
+        return !stockTrackingEnabled || (stockQuantity != null && stockQuantity > 0);
+    }
+
+    /** The quantity a cart may hold: the stock quantity when tracked (missing = 0), null when not tracked. */
+    public Long trackedStockQuantity() {
+        if (!stockTrackingEnabled) {
+            return null;
+        }
+        return stockQuantity == null ? 0L : stockQuantity;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

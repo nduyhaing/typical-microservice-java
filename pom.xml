@@ -28,6 +28,7 @@
         <module>media</module>
         <module>location</module>
         <module>tax</module>
+        <module>inventory</module>
     </modules>
 
     <properties>

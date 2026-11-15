@@ -25,6 +25,7 @@ public record ProductDetailVm(
     Boolean isFeatured,
     Boolean isVisible,
     Boolean stockTrackingEnabled,
+    Long stockQuantity,
     Double weight,
     DimensionUnit dimensionUnit,
     Double length,

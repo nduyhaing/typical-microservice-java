@@ -7,6 +7,7 @@ import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -111,4 +112,33 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     @Query("SELECT p FROM Product p WHERE p.id IN :productIds AND p.isPublished = TRUE")
     Page<Product> findAllPublishedProductsByIds(@Param("productIds") List<Long> productIds, Pageable pageable);
+
+    /**
+     * Atomic stock subtraction (decisions.md 3c-21): takes {@code quantity} units only when a stock-tracked product
+     * has at least that many; returns 0 (nothing changed) otherwise. Concurrent calls queue on the row lock and
+     * re-check the condition, so the last units are never sold twice.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Product p SET p.stockQuantity = p.stockQuantity - :quantity "
+        + "WHERE p.id = :id AND p.stockTrackingEnabled = TRUE AND p.stockQuantity >= :quantity")
+    int subtractStock(@Param("id") Long id, @Param("quantity") long quantity);
+
+    /** Gives units back (restore-quantity); a missing quantity counts as 0. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE Product p SET p.stockQuantity = COALESCE(p.stockQuantity, 0) + :quantity WHERE p.id = :id")
+    int addStock(@Param("id") Long id, @Param("quantity") long quantity);
+
+    /**
+     * Inventory's product lookup (YAS for-warehouse): products that can hold stock (not a parent with options),
+     * name and sku contain the given text (case-insensitive, empty = any), and in / not in the given ids.
+     */
+    @Query("SELECT p FROM Product p WHERE p.hasOptions = FALSE "
+        + "AND LOWER(p.name) LIKE CONCAT('%', :name, '%') "
+        + "AND (:sku = '' OR LOWER(p.sku) LIKE CONCAT('%', :sku, '%')) "
+        + "AND (:selection = 'ALL' OR (:selection = 'YES' AND p.id IN :productIds) "
+        + "OR (:selection = 'NO' AND p.id NOT IN :productIds)) "
+        + "ORDER BY p.id ASC")
+    List<Product> findForWarehouse(@Param("name") String name, @Param("sku") String sku,
+                                   @Param("productIds") List<Long> productIds,
+                                   @Param("selection") String selection);
 }

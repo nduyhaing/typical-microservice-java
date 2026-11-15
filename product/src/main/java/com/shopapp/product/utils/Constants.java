@@ -29,6 +29,9 @@ public final class Constants {
         public static final String NO_MATCHING_PRODUCT_OPTIONS = "NO_MATCHING_PRODUCT_OPTIONS";
         public static final String MAKE_SURE_LENGTH_GREATER_THAN_WIDTH = "MAKE_SURE_LENGTH_GREATER_THAN_WIDTH";
         public static final String EDIT_THE_PARENT_PRODUCT = "EDIT_THE_PARENT_PRODUCT";
+        public static final String NOT_ENOUGH_STOCK = "NOT_ENOUGH_STOCK";
+        public static final String DUPLICATED_PRODUCT_IN_LIST = "DUPLICATED_PRODUCT_IN_LIST";
+        public static final String STOCK_RESERVATION_EXISTED = "STOCK_RESERVATION_EXISTED";
 
         private ErrorCode() {
         }

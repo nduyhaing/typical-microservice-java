@@ -6,6 +6,7 @@ import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -17,6 +18,11 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 public class SecurityConfig {
 
+    /**
+     * subtract-quantity and restore-quantity are called by the order service with the customer's relayed token, so
+     * any signed-in user may call them (they can only take stock or give back their own reservation, 3c-21/3c-22);
+     * everything else under /backoffice needs realm role ADMIN.
+     */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
@@ -24,6 +30,8 @@ public class SecurityConfig {
                 .requestMatchers("/actuator/prometheus", "/actuator/health/**", "/swagger-ui", "/swagger-ui/**",
                     "/error", "/v3/api-docs/**").permitAll()
                 .requestMatchers("/storefront/**").permitAll()
+                .requestMatchers(HttpMethod.PUT, "/backoffice/products/subtract-quantity",
+                    "/backoffice/products/restore-quantity").authenticated()
                 .requestMatchers("/backoffice/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()))

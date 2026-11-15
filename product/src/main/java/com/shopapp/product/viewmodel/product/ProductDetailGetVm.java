@@ -18,6 +18,9 @@ public record ProductDetailGetVm(
     Boolean hasOptions,
     Double price,
     String thumbnailMediaUrl,
-    List<String> productImageMediaUrls
+    List<String> productImageMediaUrls,
+    boolean stockTrackingEnabled,
+    boolean stockAvailable,
+    Long stockQuantity
 ) {
 }
