@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect elasticsearch search redis product cart customer order media location tax inventory rating promotion storefront-bff storefront backoffice-bff backoffice nginx webhook webhook-receiver)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -1115,6 +1115,129 @@ check_slice4() {
         'href="/products/galaxy-'
 }
 
+# Slice 5 webhooks (decisions.md 5-38): webhooks registered at the compose receiver get correctly signed
+# ON_ORDER_CREATED (for the order check_checkout_and_order places) and ON_PRODUCT_UPDATED (for an admin rename);
+# metadata/loopback/internal URLs are refused. The name is put back and the webhooks removed afterwards.
+WEBHOOK_ORDER_ID=""
+WEBHOOK_ORDER_SECRET=""
+WEBHOOK_ORDER_PATH="/smoke-orders-$$-$RANDOM"
+
+webhook_token() {
+    curl -s -d grant_type=password -d client_id=swagger-ui -d username=admin -d password=admin \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true
+}
+
+# webhook_register <token> <path on the receiver> <secret> <event ids json>: prints "<status> <id>"
+webhook_register() {
+    local body
+    body=$(curl -s -w '\n%{http_code}' -X POST -H "Authorization: Bearer $1" -H 'Content-Type: application/json' \
+        -d "{\"payloadUrl\":\"http://webhook-receiver:8080$2\",\"secret\":\"$3\",\"isActive\":true,\"events\":$4}" \
+        "$(url api /webhook/backoffice/webhooks)" || true)
+    if grep -qF "$3" <<< "$body"; then echo "secret-echoed"; return; fi
+    echo "$(status_of "$body") $(body_of "$body" | json "d['id']")"
+}
+
+# webhook_received <path> <event> <secret>: waits up to 45 s for a correctly signed delivery of <event> at <path>
+# and prints its body
+webhook_received() {
+    local deadline=$((SECONDS + 45)) line=""
+    while [ -z "$line" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 2
+        line=$(docker compose logs --no-log-prefix webhook-receiver 2>/dev/null \
+            | grep -F "\"uri\":\"$1\"" | grep -F "\"event\":\"$2\"" | head -n 1 || true)
+    done
+    python - "$line" "$3" "$2" <<'EOF' 2>/dev/null || true
+import hashlib, hmac, json, sys
+log, secret, event = json.loads(sys.argv[1]), sys.argv[2], sys.argv[3]
+body = log["body"].encode("utf-8")
+expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+payload = json.loads(body)
+assert log["signature"] == expected and payload["event"] == event
+assert payload["deliveryId"] == log["delivery"] and log["timestamp"]
+print(json.dumps(payload))
+EOF
+}
+
+webhook_delete() {
+    curl -s -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer $1" \
+        "$(url api "/webhook/backoffice/webhooks/$2")" || true
+}
+
+# Before the checkout check: subscribe a receiver path to the order events.
+webhook_order_subscribe() {
+    local result
+    WEBHOOK_ORDER_SECRET=$(python -c "import secrets;print(secrets.token_hex(32))")
+    result=$(webhook_register "$(webhook_token)" "$WEBHOOK_ORDER_PATH" "$WEBHOOK_ORDER_SECRET" '[{"id":2},{"id":3}]')
+    if [ "${result%% *}" = "201" ]; then
+        WEBHOOK_ORDER_ID=${result#* }
+        pass "admin registers an order webhook at the compose receiver (secret not echoed)"
+    else
+        fail "register order webhook -> $result"
+    fi
+}
+
+check_webhook() {
+    local token secret status result webhook_id product_id detail related original thumb payload hook_path body
+    token=$(webhook_token)
+    for refused in "http://169.254.169.254/latest/meta-data/" "http://localhost:8080/" "http://postgres:5432/"; do
+        status=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' \
+            -d "{\"payloadUrl\":\"$refused\",\"secret\":\"smoke-secret-0123456789\",\"events\":[{\"id\":1}]}" \
+            "$(url api /webhook/backoffice/webhooks)" || true)
+        if [ "$status" = "400" ]; then pass "webhook URL $refused refused (SSRF guard)"; else fail "webhook URL $refused -> $status (expected 400)"; fi
+    done
+    if [ -n "$WEBHOOK_ORDER_ID" ]; then
+        payload=$(webhook_received "$WEBHOOK_ORDER_PATH" ON_ORDER_CREATED "$WEBHOOK_ORDER_SECRET")
+        if [ -n "$(json "d['data']['orderId']" <<< "$payload")" ] && ! grep -q '@' <<< "$payload"; then
+            pass "receiver got ON_ORDER_CREATED for order #$(json "d['data']['orderId']" <<< "$payload") with a valid X-Hub-Signature-256, no customer data"
+        else
+            fail "no correctly signed ON_ORDER_CREATED at the receiver within 45 s (docker compose logs webhook webhook-receiver)"
+        fi
+        status=$(webhook_delete "$token" "$WEBHOOK_ORDER_ID")
+        if [ "$status" = "204" ]; then pass "remove the order webhook"; else fail "remove webhook $WEBHOOK_ORDER_ID -> $status"; fi
+    fi
+    hook_path="/smoke-products-$$-$RANDOM"
+    secret=$(python -c "import secrets;print(secrets.token_hex(32))")
+    result=$(webhook_register "$token" "$hook_path" "$secret" '[{"id":1}]')
+    if [ "${result%% *}" != "201" ]; then
+        fail "register product webhook -> $result"
+        return
+    fi
+    webhook_id=${result#* }
+    pass "admin registers a product webhook at the compose receiver (secret not echoed)"
+    product_id=$(curl -s "$(url api /product/storefront/product/galaxy-a55)" | json "d['id']")
+    detail=$(curl -s -H "Authorization: Bearer $token" "$(url api "/product/backoffice/products/$product_id")" || true)
+    related=$(curl -s -H "Authorization: Bearer $token" \
+        "$(url api "/product/backoffice/products/related-products/$product_id")" || true)
+    original=$(json "d['name']" <<< "$detail")
+    thumb=$(json "(d.get('thumbnailMedia') or {}).get('id')" <<< "$detail")
+    webhook_put_name() {
+        curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            -d "$(product_put_body "$detail" "$related" "$thumb" | python -c "import json,sys;b=json.load(sys.stdin);b['name']=sys.argv[1];print(json.dumps(b))" "$1")" \
+            "$(url api "/product/backoffice/products/$product_id")" || true
+    }
+    if [ -z "$original" ] || [ "$(webhook_put_name "$original webhook smoke")" != "204" ]; then
+        fail "admin renames Galaxy A55 for the webhook check"
+    else
+        payload=$(webhook_received "$hook_path" ON_PRODUCT_UPDATED "$secret")
+        if [ "$(json "d['data']['productId']" <<< "$payload")" = "$product_id" ]; then
+            pass "receiver got ON_PRODUCT_UPDATED for the rename with a valid X-Hub-Signature-256"
+        else
+            fail "no correctly signed ON_PRODUCT_UPDATED at the receiver within 45 s (docker compose logs webhook webhook-receiver)"
+        fi
+        if [ "$(webhook_put_name "$original")" = "204" ]; then pass "restore the Galaxy A55 name"; else fail "restore the Galaxy A55 name '$original' (fix by hand)"; fi
+    fi
+    body=$(curl -s -H "Authorization: Bearer $token" "$(url api "/webhook/backoffice/webhooks/$webhook_id/notifications")" || true)
+    if [ "$(json "d['notifications'][-1]['status']" <<< "$body")" = "DELIVERED" ]; then
+        pass "delivery log shows the delivery as DELIVERED"
+    else
+        fail "delivery log: $(json "d['notifications']" <<< "$body")"
+    fi
+    status=$(webhook_delete "$token" "$webhook_id")
+    if [ "$status" = "204" ]; then pass "remove the product webhook"; else fail "remove webhook $webhook_id -> $status"; fi
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -1126,6 +1249,7 @@ run_checks() {
     check_http "API placeholder" "$(url api /)" 404
     check_databases
     check_storefront
+    webhook_order_subscribe
     check_login_and_cart
     check_backoffice
     check_media
@@ -1133,6 +1257,7 @@ run_checks() {
     check_cdc
     check_search
     check_slice4
+    check_webhook
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

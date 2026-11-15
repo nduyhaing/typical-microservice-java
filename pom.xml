@@ -34,6 +34,7 @@
         <module>search</module>
         <module>sampledata</module>
         <module>recommendation</module>
+        <module>webhook</module>
     </modules>
 
     <properties>

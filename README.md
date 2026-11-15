@@ -244,6 +244,29 @@ dbproduct.public.product --consumer group "recommendation"--> recommendation --p
 - **Postgres image**: `pgvector/pgvector:0.8.7-pg16-trixie` (PostgreSQL 16.16 on the same Debian as
   `postgres:16.16`, plus the `vector` extension); the existing `postgres-data` volume works unchanged.
 
+## Webhooks
+
+Admins register URLs that get signed JSON for `ON_PRODUCT_UPDATED`, `ON_ORDER_CREATED` and `ON_ORDER_STATUS_UPDATED`
+(webhook service, `decisions.md` 5-30..5-39). Back office: **System → Webhooks** (create/edit, events, delivery log,
+"Send test event").
+
+```
+dbproduct.public.product / dborder.public.order --group "webhook"--> webhook --log row--> delivery worker --POST--> receiver
+```
+
+- **Delivery**: `POST` with `Content-Type: application/json`, body `{"deliveryId","event","createdAt","data"}` and
+  headers `X-Hub-Signature-256: sha256=<hex HMAC-SHA256 of the raw body with the webhook's secret>`,
+  `X-Shopapp-Delivery`, `X-Shopapp-Event`, `X-Shopapp-Timestamp`. Verify on the receiver, e.g. in Python:
+  `hmac.compare_digest(sig, "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest())`.
+- **Retries**: 3 attempts (after 10 s, then 60 s) for 5xx, 408, 429, timeouts and connection errors; other answers
+  and redirects are not retried. Every attempt is in the delivery log (`GET /webhook/backoffice/webhooks/{id}/notifications`).
+- **SSRF guard**: only http(s) URLs whose host resolves to public addresses are accepted, at registration and again
+  at send time (the checked address is the one connected to). Hosts in `WEBHOOK_ALLOWED_HOSTS` (compose default:
+  `webhook-receiver`) are exempt — local testing only.
+- **Test receiver**: `webhook-receiver` logs every request (headers and body) as one JSON line:
+  register `http://webhook-receiver:8080/anything`, then `docker compose logs -f webhook-receiver`.
+- The secret is shown once (when you create or regenerate it); the API only returns its last four characters.
+
 ## Reviews
 
 Customers review products on the storefront product page (rating service, slice 4, `decisions.md` 4-30..4-39).
@@ -315,6 +338,7 @@ Coupon codes at checkout (promotion service, slice 4, `decisions.md` 4-40..4-59)
 | Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
 | Storefront search page | http://storefront.shopapp.local/search?keyword=galaxy | public (header search box with suggestions) |
 | Recommendation API | http://api.shopapp.local/recommendation/embedding/product/{id}/similarity | public; `POST /recommendation/backoffice/reindex` needs ADMIN |
+| Webhook API / test receiver | http://api.shopapp.local/webhook/backoffice/webhooks, `docker compose logs webhook-receiver` | ADMIN; back office System → Webhooks |
 | Rating API | http://api.shopapp.local/rating/storefront/ratings/products/{productId}, .../rating/storefront/ratings/product/{productId}/average-star, .../rating/backoffice/ratings | lists and averages public; posting/deleting own reviews needs CUSTOMER; `backoffice` ADMIN |
 | Promotion API | http://api.shopapp.local/promotion/backoffice/promotions, .../promotion/storefront/promotions/verify | `backoffice` ADMIN; `storefront` any logged-in user (order calls it with the customer's token) |
 | Back office: reviews, promotions | http://backoffice.shopapp.local/reviews, /promotion/manager-promotion | `admin` / `admin` |

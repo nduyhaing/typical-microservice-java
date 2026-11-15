@@ -78,6 +78,16 @@ export const NAV_GROUPS: { label: string; links: NavLink[] }[] = [
       },
     ],
   },
+  {
+    label: 'System',
+    links: [
+      {
+        href: '/webhook',
+        label: 'Webhooks',
+        description: 'Signed product and order event deliveries to external URLs, with their delivery log.',
+      },
+    ],
+  },
 ];
 
 function AccountMenu() {
