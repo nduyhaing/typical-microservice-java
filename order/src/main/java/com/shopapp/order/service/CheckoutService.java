@@ -53,7 +53,9 @@ public class CheckoutService {
                 .productId(product.id())
                 .productName(product.name())
                 .quantity(requested.quantity())
-                .productPrice(BigDecimal.valueOf(product.price()))
+                // product prices are doubles: money is BigDecimal in cents from here on (decisions.md 3c-40)
+                .productPrice(OrderPricing.money(BigDecimal.valueOf(product.price())))
+                .taxClassId(product.taxClassId())
                 .build());
         }
         checkout.setTotalAmount(checkout.getCheckoutItems().stream()

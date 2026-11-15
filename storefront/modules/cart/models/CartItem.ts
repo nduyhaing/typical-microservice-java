@@ -15,4 +15,6 @@ export type CartLine = {
   quantity: number;
   /** false when the product was unpublished or removed after it was added: shown, not priced, removable */
   available: boolean;
+  /** units in stock when the product's stock is tracked (decisions.md 3c-24); undefined = no limit */
+  stockQuantity?: number;
 };

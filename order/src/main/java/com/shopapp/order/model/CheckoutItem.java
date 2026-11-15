@@ -34,6 +34,9 @@ public class CheckoutItem extends AbstractAuditEntity {
 
     private Long productId;
 
+    /** The product's tax class when the checkout was made; the rate depends on the address (decisions.md 3c-42). */
+    private Long taxClassId;
+
     @Column(name = "name")
     private String productName;
 

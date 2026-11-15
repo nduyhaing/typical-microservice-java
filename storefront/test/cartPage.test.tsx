@@ -92,5 +92,29 @@ describe('Cart page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove Product no longer available' }));
     expect(cartService.removeItem).toHaveBeenCalledWith(9);
   });
+  it('shows the stock message when the cart refuses a quantity', async () => {
+    vi.mocked(cartService.getCartLines).mockResolvedValue(lines);
+    vi.mocked(cartService.updateQuantity).mockRejectedValue(
+      new ApiError(400, { detail: 'Only 2 of Galaxy S24 Violet are in stock' })
+    );
+
+    render(<CartPage />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Increase Galaxy S24 Violet' }));
+
+    expect(await screen.findByText('Only 2 of Galaxy S24 Violet are in stock')).toBeInTheDocument();
+  });
+
+  it('caps plus at the tracked stock and flags lines above it', async () => {
+    vi.mocked(cartService.getCartLines).mockResolvedValue([
+      { ...lines[0], quantity: 2, stockQuantity: 2 },
+      { ...lines[1], quantity: 3, stockQuantity: 1 },
+    ]);
+
+    render(<CartPage />);
+
+    expect(await screen.findByRole('button', { name: 'Increase Galaxy S24 Violet' })).toBeDisabled();
+    expect(screen.getByTestId('stock-2')).toHaveTextContent('Only 1 in stock');
+    expect(screen.queryByTestId('stock-1')).not.toBeInTheDocument();
+  });
 });
 

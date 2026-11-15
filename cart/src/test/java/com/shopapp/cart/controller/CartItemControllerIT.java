@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterAll;
@@ -39,7 +40,9 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 @Import(PostgresContainerSupport.class)
 class CartItemControllerIT {
 
-    private static final Set<Long> PUBLISHED_PRODUCTS = Set.of(10L, 11L);
+    private static final Set<Long> PUBLISHED_PRODUCTS = Set.of(10L, 11L, 12L, 13L);
+    /** Stock-tracked products: 12 has 3 units, 13 is out of stock; 10 and 11 are not tracked. */
+    private static final Map<Long, Integer> TRACKED_STOCK = Map.of(12L, 3, 13L, 0);
     private static final AtomicBoolean PRODUCT_SERVICE_DOWN = new AtomicBoolean(false);
     private static final HttpServer PRODUCT_SERVICE = productService();
 
@@ -58,7 +61,8 @@ class CartItemControllerIT {
                 long id = Long.parseLong(query.substring(query.indexOf('=') + 1));
                 int status = PRODUCT_SERVICE_DOWN.get() ? 503 : 200;
                 String body = PRODUCT_SERVICE_DOWN.get() ? "" : PUBLISHED_PRODUCTS.contains(id)
-                    ? "[{\"id\":" + id + ",\"name\":\"P" + id + "\",\"slug\":\"p\",\"thumbnailUrl\":\"\",\"price\":1.0}]"
+                    ? "[{\"id\":" + id + ",\"name\":\"P" + id + "\",\"slug\":\"p\",\"thumbnailUrl\":\"\",\"price\":1.0,"
+                        + stock(id) + "}]"
                     : "[]";
                 byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().add("Content-Type", "application/json");
@@ -73,6 +77,13 @@ class CartItemControllerIT {
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
+    }
+
+    private static String stock(long id) {
+        Integer quantity = TRACKED_STOCK.get(id);
+        return quantity == null
+            ? "\"stockTrackingEnabled\":false,\"stockAvailable\":true,\"stockQuantity\":null"
+            : "\"stockTrackingEnabled\":true,\"stockAvailable\":" + (quantity > 0) + ",\"stockQuantity\":" + quantity;
     }
 
     @DynamicPropertySource
@@ -234,5 +245,59 @@ class CartItemControllerIT {
 
         org.assertj.core.api.Assertions.assertThat(repository.findById(new CartItemId("u-1", 10L)))
             .get().extracting(CartItem::getQuantity).isEqualTo(1000);
+    }
+
+    @Test
+    void add_trackedProductWithinStock_succeeds() throws Exception {
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":12,\"quantity\":3}").with(user("u-1")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.quantity").value(3));
+    }
+
+    @Test
+    void add_trackedProductBeyondStock_returns400() throws Exception {
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":12,\"quantity\":4}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Only 3 of P12 are in stock"));
+
+        org.assertj.core.api.Assertions.assertThat(repository.findAll()).isEmpty();
+    }
+
+    @Test
+    void add_mergeBeyondStock_returns400AndKeepsQuantity() throws Exception {
+        stored("u-1", 12L, 2);
+
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":12,\"quantity\":2}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Only 3 of P12 are in stock"));
+
+        org.assertj.core.api.Assertions.assertThat(repository.findById(new CartItemId("u-1", 12L)))
+            .get().extracting(CartItem::getQuantity).isEqualTo(2);
+    }
+
+    @Test
+    void update_trackedProductBeyondStock_returns400() throws Exception {
+        stored("u-1", 12L, 1);
+
+        mockMvc.perform(json(put("/storefront/cart/items/12"), "{\"quantity\":4}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Only 3 of P12 are in stock"));
+        mockMvc.perform(json(put("/storefront/cart/items/12"), "{\"quantity\":3}").with(user("u-1")))
+            .andExpect(status().isOk());
+    }
+
+    @Test
+    void add_outOfStockProduct_returns400() throws Exception {
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":13,\"quantity\":1}").with(user("u-1")))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("P13 is out of stock"));
+    }
+
+    @Test
+    void add_untrackedProduct_ignoresStock() throws Exception {
+        mockMvc.perform(json(post("/storefront/cart/items"), "{\"productId\":10,\"quantity\":500}").with(user("u-1")))
+            .andExpect(status().isOk());
+        mockMvc.perform(json(put("/storefront/cart/items/10"), "{\"quantity\":900}").with(user("u-1")))
+            .andExpect(status().isOk());
     }
 }

@@ -8,9 +8,14 @@ import { vi } from 'vitest';
 import { ApiError } from '../../../common/services/ApiClientService';
 import * as authService from '../../auth/services/AuthenticationService';
 import * as cartService from '../../cart/services/CartService';
+import * as productService from '../services/ProductService';
 import ProductDetails from './ProductDetails';
 
 vi.mock('../../cart/services/CartService');
+vi.mock('../services/ProductService');
+
+// variation stock lookup (list-featured): unknown unless a test says otherwise
+beforeEach(() => vi.mocked(productService.getProductsByIds).mockResolvedValue([]));
 vi.mock('../../auth/services/AuthenticationService', async (original) => ({
   ...(await original<typeof authService>()),
   redirectToLogin: vi.fn(),
@@ -197,5 +202,49 @@ describe('ProductDetails gallery', () => {
 
     expect(screen.getByRole('img', { name: 'USB-C Cable' }).getAttribute('src')).toContain(PLACEHOLDER_IMAGE);
     expect(screen.queryByRole('button', { name: /^Show image/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('ProductDetails stock', () => {
+  afterEach(() => vi.resetAllMocks());
+
+  it('shows "In stock" for an available product', () => {
+    render(<ProductDetails product={{ ...bare, stockTrackingEnabled: true, stockAvailable: true, stockQuantity: 3 }} options={[]} variations={[]} />);
+
+    expect(screen.getByTestId('stock-status')).toHaveTextContent('In stock');
+    expect(screen.getByRole('button', { name: 'Add to cart' })).toBeEnabled();
+  });
+
+  it('shows "Out of stock" and disables add to cart', () => {
+    render(<ProductDetails product={{ ...bare, stockTrackingEnabled: true, stockAvailable: false, stockQuantity: 0 }} options={[]} variations={[]} />);
+
+    expect(screen.getByTestId('stock-status')).toHaveTextContent('Out of stock');
+    expect(screen.getByRole('button', { name: 'Add to cart' })).toBeDisabled();
+  });
+
+  it("uses the selected variation's stock", async () => {
+    vi.mocked(productService.getProductsByIds).mockImplementation(async (ids) =>
+      ids.map((id) => ({ id, name: `V${id}`, slug: '', thumbnailUrl: '', price: 1, stockTrackingEnabled: true, stockAvailable: id === 2, stockQuantity: id === 2 ? 5 : 0 }))
+    );
+    render(<ProductDetails product={{ ...galaxy, stockAvailable: true }} options={options} variations={variations} />);
+    expect(screen.queryByTestId('stock-status')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Violet' }));
+    expect(await screen.findByText('Out of stock')).toBeInTheDocument();
+    expect(productService.getProductsByIds).toHaveBeenLastCalledWith([3]);
+    expect(screen.getByRole('button', { name: 'Add to cart' })).toBeDisabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Black' }));
+    expect(await screen.findByText('In stock')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add to cart' })).toBeEnabled();
+  });
+
+  it("shows the cart's stock message when adding too many", async () => {
+    vi.mocked(cartService.addToCart).mockRejectedValue(new ApiError(400, { detail: 'Only 3 of USB-C Cable are in stock' }));
+    render(<ProductDetails product={{ ...bare, stockTrackingEnabled: true, stockAvailable: true, stockQuantity: 3 }} options={[]} variations={[]} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+    expect(await screen.findByText('Only 3 of USB-C Cable are in stock')).toBeInTheDocument();
   });
 });

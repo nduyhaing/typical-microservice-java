@@ -10,16 +10,20 @@ import java.math.BigDecimal;
 import java.time.ZonedDateTime;
 import java.util.List;
 
-/** An order as the storefront shows it ("my orders", order confirmation). */
+/**
+ * An order as the storefront shows it ("my orders", order confirmation). {@code totalPrice} = subtotal + tax -
+ * discount (decisions.md 3c-43).
+ */
 public record OrderVm(
     Long id,
     String email,
     String checkoutId,
     String note,
     int numberItem,
+    BigDecimal subtotal,
+    BigDecimal tax,
+    BigDecimal discount,
     BigDecimal totalPrice,
-    float tax,
-    float discount,
     BigDecimal deliveryFee,
     OrderStatus orderStatus,
     PaymentStatus paymentStatus,
@@ -30,10 +34,12 @@ public record OrderVm(
     List<ItemVm> orderItemVms
 ) {
 
-    public record ItemVm(Long productId, String productName, int quantity, BigDecimal productPrice) {
+    public record ItemVm(Long productId, String productName, int quantity, BigDecimal productPrice,
+                         BigDecimal taxPercent, BigDecimal taxAmount) {
 
         static ItemVm fromModel(OrderItem item) {
-            return new ItemVm(item.getProductId(), item.getProductName(), item.getQuantity(), item.getProductPrice());
+            return new ItemVm(item.getProductId(), item.getProductName(), item.getQuantity(), item.getProductPrice(),
+                item.getTaxPercent(), item.getTaxAmount());
         }
     }
 
@@ -48,8 +54,12 @@ public record OrderVm(
     }
 
     public static OrderVm fromModel(Order order, List<OrderItem> items) {
+        BigDecimal subtotal = items.stream()
+            .map(item -> item.getProductPrice().multiply(BigDecimal.valueOf(item.getQuantity())))
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
         return new OrderVm(order.getId(), order.getEmail(), order.getCheckoutId(), order.getNote(),
-            order.getNumberItem(), order.getTotalPrice(), order.getTax(), order.getDiscount(), order.getDeliveryFee(),
+            order.getNumberItem(), subtotal, order.getTax(), order.getDiscount(), order.getTotalPrice(),
+            order.getDeliveryFee(),
             order.getOrderStatus(), order.getPaymentStatus(), order.getPaymentMethodId(), order.getDeliveryStatus(),
             order.getCreatedOn(), AddressVm.fromModel(order.getShippingAddressId()),
             items.stream().map(ItemVm::fromModel).toList());

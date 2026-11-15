@@ -51,6 +51,11 @@ export default function MyOrdersPage() {
                 </li>
               ))}
             </ul>
+            {!!order.tax && (
+              <div className="text-end small text-muted" data-testid={`order-tax-${order.id}`}>
+                incl. tax {formatPrice(order.tax)}
+              </div>
+            )}
             <div className="text-end fw-bold" data-testid={`order-total-${order.id}`}>
               {formatPrice(order.totalPrice)}
             </div>

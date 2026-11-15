@@ -2,6 +2,8 @@ package com.shopapp.order.controller;
 
 import com.shopapp.order.service.OrderService;
 import com.shopapp.order.viewmodel.order.OrderPostVm;
+import com.shopapp.order.viewmodel.order.OrderPreviewPostVm;
+import com.shopapp.order.viewmodel.order.OrderPreviewVm;
 import com.shopapp.order.viewmodel.order.OrderVm;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -22,6 +24,12 @@ public class OrderController {
     @PostMapping("/storefront/orders")
     public ResponseEntity<OrderVm> createOrder(@Valid @RequestBody OrderPostVm orderPostVm) {
         return ResponseEntity.ok(orderService.createOrder(orderPostVm));
+    }
+
+    /** Subtotal, tax per line and total of a checkout shipped to an address, priced by the server (3c-46). */
+    @PostMapping("/storefront/orders/preview")
+    public ResponseEntity<OrderPreviewVm> previewOrder(@Valid @RequestBody OrderPreviewPostVm previewPostVm) {
+        return ResponseEntity.ok(orderService.previewOrder(previewPostVm));
     }
 
     @GetMapping("/storefront/orders/my-orders")

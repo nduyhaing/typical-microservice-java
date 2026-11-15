@@ -4,6 +4,7 @@ import com.shopapp.order.model.Checkout;
 import com.shopapp.order.model.enumeration.CheckoutState;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -13,6 +14,10 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface CheckoutRepository extends JpaRepository<Checkout, String> {
     Optional<Checkout> findByIdAndCheckoutState(String id, CheckoutState state);
+
+    /** The checkout with its items loaded, for pricing outside a transaction. */
+    @EntityGraph(attributePaths = "checkoutItems")
+    Optional<Checkout> findWithItemsById(String id);
 
     /** Locks the checkout row so concurrent "place order" calls for it run one after another. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -21,5 +21,7 @@ public final class Constants {
         public static final String ADD_CART_ITEM_FAILED = "ADD_CART_ITEM_FAILED";
         public static final String DUPLICATED_CART_ITEMS_TO_DELETE = "DUPLICATED_CART_ITEMS_TO_DELETE";
         public static final String QUANTITY_TOO_LARGE = "QUANTITY_TOO_LARGE";
+        public static final String NOT_ENOUGH_STOCK = "NOT_ENOUGH_STOCK";
+        public static final String OUT_OF_STOCK = "OUT_OF_STOCK";
     }
 }

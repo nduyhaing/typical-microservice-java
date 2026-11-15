@@ -14,6 +14,10 @@ export type ProductDetail = {
   isFeatured: boolean;
   hasOptions: boolean;
   price: number;
+  /** decisions.md 3c-24: false when tracked and none left; optional for older product services */
+  stockTrackingEnabled?: boolean;
+  stockAvailable?: boolean;
+  stockQuantity?: number | null;
   thumbnailMediaUrl: string;
   productImageMediaUrls: string[];
 };

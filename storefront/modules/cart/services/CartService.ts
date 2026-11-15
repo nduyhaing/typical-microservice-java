@@ -44,6 +44,7 @@ export async function getCartLines(): Promise<CartLine[]> {
       price: product.price ?? 0,
       quantity: item.quantity,
       available: true,
+      stockQuantity: product.stockTrackingEnabled ? (product.stockQuantity ?? 0) : undefined,
     };
   });
 }

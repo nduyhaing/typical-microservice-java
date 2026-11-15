@@ -14,12 +14,13 @@ import { CartLine } from '../modules/cart/models/CartItem';
 import { getCartLines, removeItem, updateQuantity } from '../modules/cart/services/CartService';
 import { createCheckout } from '../modules/order/services/OrderService';
 
-/** The logged-in customer's cart (slice 2b). Checkout comes in 2c. */
+/** The logged-in customer's cart (slice 2b; checkout 2c; stock limits and messages 3c). */
 export default function CartPage() {
   const router = useRouter();
   const [version, setVersion] = useState(0);
   const [checkingOut, setCheckingOut] = useState(false);
-  const [actionError, setActionError] = useState(false);
+  // true: generic error; string: the server's explanation (e.g. "Only 3 of Galaxy S24 Violet are in stock")
+  const [actionError, setActionError] = useState<boolean | string>(false);
   const { data: lines, error, loading } = useFetch(getCartLines, [version]);
   const notLoggedIn = error instanceof ApiError && (error.status === 401 || error.status === 403);
 
@@ -27,8 +28,9 @@ export default function CartPage() {
     try {
       await action();
       setActionError(false);
-    } catch {
-      setActionError(true);
+    } catch (error) {
+      const detail = error instanceof ApiError ? (error.body as { detail?: unknown } | null)?.detail : undefined;
+      setActionError(error instanceof ApiError && error.status === 400 && typeof detail === 'string' ? detail : true);
     }
     setVersion((current) => current + 1);
   };
@@ -61,7 +63,8 @@ export default function CartPage() {
       <h1 className="h3 mb-3">Your cart</h1>
       {loading && <Spinner animation="border" role="status" aria-label="Loading" />}
       {notLoggedIn && <a href={LOGIN_URL}>Log in to see your cart</a>}
-      {(actionError || (error && !notLoggedIn)) && <ErrorMessage />}
+      {typeof actionError === 'string' && <ErrorMessage message={actionError} />}
+      {(actionError === true || (error && !notLoggedIn)) && <ErrorMessage />}
       {lines && lines.length === 0 && (
         <p>
           Your cart is empty. <Link href="/products">Browse products</Link>
@@ -95,9 +98,15 @@ export default function CartPage() {
                       {line.quantity}
                     </span>
                     <Button size="sm" variant="outline-secondary" aria-label={`Increase ${line.name}`}
+                      disabled={line.stockQuantity !== undefined && line.quantity >= line.stockQuantity}
                       onClick={() => increase(line)}>
                       +
                     </Button>
+                    {line.stockQuantity !== undefined && line.quantity > line.stockQuantity && (
+                      <div className="small text-danger" data-testid={`stock-${line.productId}`}>
+                        {line.stockQuantity === 0 ? 'Out of stock' : `Only ${line.stockQuantity} in stock`}
+                      </div>
+                    )}
                   </td>
                   <td className="text-end" data-testid={`line-total-${line.productId}`}>
                     {formatPrice(line.price * line.quantity)}

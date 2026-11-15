@@ -5,6 +5,7 @@ import com.shopapp.commonlibrary.config.ServiceUrlConfig;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -51,7 +52,8 @@ public class ProductService {
         }
     }
 
-    public boolean existsById(Long id) {
-        return getProducts(List.of(id)).stream().anyMatch(product -> product.id() == id);
+    /** The product if it may be put in a cart (published). */
+    public Optional<ProductThumbnailVm> getProduct(Long id) {
+        return getProducts(List.of(id)).stream().filter(product -> product.id() == id).findFirst();
     }
 }

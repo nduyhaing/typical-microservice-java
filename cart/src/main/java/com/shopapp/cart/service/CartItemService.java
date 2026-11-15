@@ -8,6 +8,7 @@ import com.shopapp.cart.viewmodel.CartItemDeleteVm;
 import com.shopapp.cart.viewmodel.CartItemGetVm;
 import com.shopapp.cart.viewmodel.CartItemPostVm;
 import com.shopapp.cart.viewmodel.CartItemPutVm;
+import com.shopapp.cart.viewmodel.ProductThumbnailVm;
 import com.shopapp.commonlibrary.exception.BadRequestException;
 import com.shopapp.commonlibrary.exception.InternalServerErrorException;
 import com.shopapp.commonlibrary.exception.NotFoundException;
@@ -36,17 +37,18 @@ public class CartItemService {
 
     @Transactional
     public CartItemGetVm addCartItem(CartItemPostVm cartItemPostVm) {
-        validateProduct(cartItemPostVm.productId());
+        ProductThumbnailVm product = validateProduct(cartItemPostVm.productId());
 
         String currentUserId = AuthenticationUtils.extractUserId();
-        CartItem cartItem = performAddCartItem(cartItemPostVm, currentUserId);
+        CartItem cartItem = performAddCartItem(cartItemPostVm, currentUserId, product);
 
         return cartItemMapper.toGetVm(cartItem);
     }
 
     @Transactional
     public CartItemGetVm updateCartItem(Long productId, CartItemPutVm cartItemPutVm) {
-        validateProduct(productId);
+        ProductThumbnailVm product = validateProduct(productId);
+        requireStock(product, cartItemPutVm.quantity());
 
         String currentUserId = AuthenticationUtils.extractUserId();
         CartItem cartItem = cartItemMapper.toCartItem(currentUserId, productId, cartItemPutVm.quantity());
@@ -94,17 +96,35 @@ public class CartItemService {
         cartItemRepository.deleteByCustomerIdAndProductId(currentUserId, productId);
     }
 
-    private void validateProduct(Long productId) {
-        if (!productService.existsById(productId)) {
-            throw new NotFoundException(Constants.ErrorCode.NOT_FOUND_PRODUCT, productId);
-        }
+    private ProductThumbnailVm validateProduct(Long productId) {
+        return productService.getProduct(productId)
+            .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.NOT_FOUND_PRODUCT, productId));
     }
 
-    private CartItem performAddCartItem(CartItemPostVm cartItemPostVm, String currentUserId) {
+    /**
+     * A stock-tracked product can only be in a cart up to its stock (decisions.md 3c-47); untracked products are not
+     * limited. The order still takes the stock atomically, so this is a convenience check, not the guarantee.
+     */
+    private static void requireStock(ProductThumbnailVm product, long quantity) {
+        Long available = product.availableQuantity();
+        if (available == null || quantity <= available) {
+            return;
+        }
+        if (available == 0) {
+            throw new BadRequestException(Constants.ErrorCode.OUT_OF_STOCK, product.name());
+        }
+        throw new BadRequestException(Constants.ErrorCode.NOT_ENOUGH_STOCK, available, product.name());
+    }
+
+    private CartItem performAddCartItem(CartItemPostVm cartItemPostVm, String currentUserId,
+                                        ProductThumbnailVm product) {
         try {
             return cartItemRepository.findByCustomerIdAndProductId(currentUserId, cartItemPostVm.productId())
-                .map(existingCartItem -> updateExistingCartItem(cartItemPostVm, existingCartItem))
-                .orElseGet(() -> createNewCartItem(cartItemPostVm, currentUserId));
+                .map(existingCartItem -> updateExistingCartItem(cartItemPostVm, existingCartItem, product))
+                .orElseGet(() -> {
+                    requireStock(product, cartItemPostVm.quantity());
+                    return createNewCartItem(cartItemPostVm, currentUserId);
+                });
         } catch (PessimisticLockingFailureException e) {
             log.error("Failed to acquire lock for adding cart item", e);
             throw new InternalServerErrorException(Constants.ErrorCode.ADD_CART_ITEM_FAILED);
@@ -116,12 +136,14 @@ public class CartItemService {
         return cartItemRepository.save(cartItem);
     }
 
-    private CartItem updateExistingCartItem(CartItemPostVm cartItemPostVm, CartItem existingCartItem) {
+    private CartItem updateExistingCartItem(CartItemPostVm cartItemPostVm, CartItem existingCartItem,
+                                            ProductThumbnailVm product) {
         // checked in long arithmetic: YAS overflowed int here and stored a negative quantity
         long merged = (long) existingCartItem.getQuantity() + cartItemPostVm.quantity();
         if (merged > Constants.MAX_CART_QUANTITY) {
             throw new BadRequestException(Constants.ErrorCode.QUANTITY_TOO_LARGE, Constants.MAX_CART_QUANTITY);
         }
+        requireStock(product, merged);
         existingCartItem.setQuantity((int) merged);
         return cartItemRepository.save(existingCartItem);
     }

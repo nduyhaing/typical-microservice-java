@@ -207,6 +207,9 @@ services:
       # in-network through the nginx alias, like the browser-facing API
       SHOPAPP_SERVICES_PRODUCT: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/product
       SHOPAPP_SERVICES_CART: http://api.${DOMAIN}:${NGINX_HTTP_PORT}/cart
+      # tax rates and saved addresses at order time, straight to the containers (decisions.md 3c-44)
+      SHOPAPP_SERVICES_TAX: http://tax:8080/tax
+      SHOPAPP_SERVICES_LOCATION: http://location:8080/location
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /order/actuator/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q UP <&3"]
       interval: 10s

@@ -1,17 +1,20 @@
 import Image from 'next/image';
 import { useState } from 'react';
 import Alert from 'react-bootstrap/Alert';
+import Badge from 'react-bootstrap/Badge';
 import Button from 'react-bootstrap/Button';
 import Form from 'react-bootstrap/Form';
 import Col from 'react-bootstrap/Col';
 import Row from 'react-bootstrap/Row';
 import Table from 'react-bootstrap/Table';
+import { useFetch } from '../../../common/hooks/useFetch';
 import { ApiError } from '../../../common/services/ApiClientService';
 import { formatPrice } from '../../../common/utils/format';
 import { imageOrPlaceholder } from '../../../common/utils/image';
 import { ProductDetail } from '../models/ProductDetail';
 import { ProductOptions } from '../models/ProductOptions';
 import { ProductVariation } from '../models/ProductVariation';
+import { getProductsByIds } from '../services/ProductService';
 import { findVariation } from '../utils/variation';
 import { redirectToLogin } from '../../auth/services/AuthenticationService';
 import { addToCart } from '../../cart/services/CartService';
@@ -45,6 +48,16 @@ export default function ProductDetails({ product, options, variations }: Props) 
   );
   // a product with options is bought as one of its variations (variations are products in YAS)
   const productIdToAdd = product.hasOptions ? variation?.id : product.id;
+  // a variation's stock is not in the variation list: ask list-featured for it (decisions.md 3c-24, 3c-49)
+  const variationId = product.hasOptions ? variation?.id : undefined;
+  const { data: variationStock } = useFetch(
+    () => (variationId === undefined ? Promise.resolve(undefined) : getProductsByIds([variationId])),
+    [variationId]
+  );
+  // true / false when known; undefined while unknown (the cart checks the stock again)
+  const inStock: boolean | undefined = product.hasOptions
+    ? variationStock?.find((candidate) => candidate.id === variationId)?.stockAvailable
+    : product.stockAvailable;
 
   const handleAddToCart = async () => {
     if (productIdToAdd === undefined) {
@@ -58,7 +71,15 @@ export default function ProductDetails({ product, options, variations }: Props) 
         redirectToLogin();
         return;
       }
-      setCartMessage({ variant: 'danger', text: 'Could not add to your cart. Please try again.' });
+      // a 400 explains itself, e.g. "Only 3 of Galaxy S24 Violet are in stock"
+      const detail = error instanceof ApiError ? (error.body as { detail?: unknown } | null)?.detail : undefined;
+      setCartMessage({
+        variant: 'danger',
+        text:
+          error instanceof ApiError && error.status === 400 && typeof detail === 'string'
+            ? detail
+            : 'Could not add to your cart. Please try again.',
+      });
     }
   };
 
@@ -103,6 +124,11 @@ export default function ProductDetails({ product, options, variations }: Props) 
           <p className="fs-3 fw-bold" data-testid="price">
             {formatPrice(price)}
           </p>
+          {inStock !== undefined && (
+            <p data-testid="stock-status">
+              {inStock ? <Badge bg="success">In stock</Badge> : <Badge bg="secondary">Out of stock</Badge>}
+            </p>
+          )}
           {product.shortDescription && <p>{product.shortDescription}</p>}
 
           {options.map((option) => (
@@ -140,7 +166,11 @@ export default function ProductDetails({ product, options, variations }: Props) 
                   onChange={(event) => setQuantityText(event.target.value)}
                 />
               </Form.Group>
-              <Button variant="primary" disabled={productIdToAdd === undefined} onClick={handleAddToCart}>
+              <Button
+                variant="primary"
+                disabled={productIdToAdd === undefined || inStock === false}
+                onClick={handleAddToCart}
+              >
                 Add to cart
               </Button>
             </div>

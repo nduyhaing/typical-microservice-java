@@ -1,7 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import { ApiError } from '../common/services/ApiClientService';
+import * as addressService from '../modules/address/services/AddressService';
 import * as authService from '../modules/auth/services/AuthenticationService';
 import * as cartService from '../modules/cart/services/CartService';
 import * as orderService from '../modules/order/services/OrderService';
@@ -18,6 +19,7 @@ vi.mock('../modules/auth/services/AuthenticationService', async (original) => ({
 }));
 vi.mock('../modules/cart/services/CartService');
 vi.mock('../modules/order/services/OrderService');
+vi.mock('../modules/address/services/AddressService');
 
 const violet = { productId: 25, name: 'Galaxy S24 Violet', slug: 'galaxy-s24-violet', thumbnailUrl: '', price: 819, quantity: 2, available: true };
 const checkout = {
@@ -73,90 +75,159 @@ describe('Cart page checkout button', () => {
 });
 
 describe('Checkout page', () => {
+  const home = {
+    id: 101,
+    contactName: 'Customer Home',
+    phone: '0901',
+    addressLine1: '1 Le Loi',
+    addressLine2: null,
+    city: 'Ho Chi Minh City',
+    zipCode: '700000',
+    districtId: 100,
+    districtName: 'District 1',
+    stateOrProvinceId: 10,
+    stateOrProvinceName: 'Ho Chi Minh',
+    countryId: 1,
+    countryName: 'Viet Nam',
+    isActive: true,
+  };
+  const office = { ...home, id: 102, contactName: 'Customer Office', countryId: 2, countryName: 'United States', isActive: false };
+  const taxedPreview = {
+    checkoutId: 'c-1',
+    subtotal: 1638,
+    totalTax: 163.8,
+    discount: 0,
+    deliveryFee: 0,
+    total: 1801.8,
+    items: [
+      { productId: 25, productName: 'Galaxy S24 Violet', quantity: 2, productPrice: 819, subtotal: 1638, taxPercent: 10, taxAmount: 163.8 },
+    ],
+  };
+  const untaxedPreview = { ...taxedPreview, totalTax: 0, total: 1638 };
+
   beforeEach(() => {
     router.query = { id: 'c-1' };
+    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+    vi.mocked(addressService.getUserAddresses).mockResolvedValue([office, home]);
+    vi.mocked(addressService.getCountries).mockResolvedValue([
+      { id: 1, code2: 'VN', name: 'Viet Nam' },
+      { id: 2, code2: 'US', name: 'United States' },
+    ]);
+    vi.mocked(addressService.getStatesOrProvinces).mockResolvedValue([]);
+    vi.mocked(addressService.getDistricts).mockResolvedValue([]);
+    vi.mocked(orderService.previewOrder).mockImplementation(async (_id, address) =>
+      'shippingAddressId' in address && address.shippingAddressId === 101 ? taxedPreview : untaxedPreview
+    );
   });
 
-  it('shows the items and the server total', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
-
+  it('preselects the default saved address and shows the server subtotal, tax and total', async () => {
     render(<CheckoutPage />);
 
     expect(await screen.findByText('Galaxy S24 Violet')).toBeInTheDocument();
-    expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,638.00');
+    expect(await screen.findByRole('radio', { name: /Customer Home/ })).toBeChecked();
+    await waitFor(() => expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$163.80'));
+    expect(screen.getByTestId('checkout-subtotal')).toHaveTextContent('$1,638.00');
+    expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,801.80');
+    expect(orderService.previewOrder).toHaveBeenCalledWith('c-1', { shippingAddressId: 101 });
     expect(screen.getByText('Cash on delivery')).toBeInTheDocument();
   });
 
-  it('requires the address fields before placing the order', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
-
+  it('refreshes the summary from the server when another address is chosen', async () => {
     render(<CheckoutPage />);
+    await waitFor(() => expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$163.80'));
 
-    const place = await screen.findByRole('button', { name: 'Place order' });
-    expect(place).toBeDisabled();
-    await userEvent.type(screen.getByLabelText('Full name'), 'Customer Dev');
-    await userEvent.type(screen.getByLabelText('Phone'), '0123456789');
-    await userEvent.type(screen.getByLabelText('Address'), '1 Main St');
-    await userEvent.type(screen.getByLabelText('City'), 'Ho Chi Minh City');
-    expect(place).toBeDisabled();
-    await userEvent.type(screen.getByLabelText('Country'), 'Vietnam');
-    expect(place).toBeEnabled();
+    await userEvent.click(screen.getByRole('radio', { name: /Customer Office/ }));
+
+    expect(orderService.previewOrder).toHaveBeenLastCalledWith('c-1', { shippingAddressId: 102 });
+    await waitFor(() => expect(screen.getByTestId('checkout-total')).toHaveTextContent('$1,638.00'));
+    expect(screen.getByTestId('checkout-tax')).toHaveTextContent('$0.00');
   });
 
-  it('places the order and goes to my orders', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+  it('places the order with the chosen saved address and goes to my orders', async () => {
     vi.mocked(orderService.placeOrder).mockResolvedValue(order);
 
     render(<CheckoutPage />);
-    await userEvent.type(await screen.findByLabelText('Full name'), 'Customer Dev');
-    await userEvent.type(screen.getByLabelText('Phone'), '0123456789');
-    await userEvent.type(screen.getByLabelText('Address'), '1 Main St');
-    await userEvent.type(screen.getByLabelText('City'), 'Ho Chi Minh City');
-    await userEvent.type(screen.getByLabelText('Country'), 'Vietnam');
-    await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
+    await placeWithDefaultAddress();
 
-    expect(orderService.placeOrder).toHaveBeenCalledWith(
-      expect.objectContaining({
-        checkoutId: 'c-1',
-        paymentMethod: 'COD',
-        shippingAddressPostVm: expect.objectContaining({ contactName: 'Customer Dev', countryName: 'Vietnam' }),
-      })
-    );
+    expect(orderService.placeOrder).toHaveBeenCalledWith({
+      checkoutId: 'c-1',
+      shippingAddressId: 101,
+      note: undefined,
+      paymentMethod: 'COD',
+    });
     expect(push).toHaveBeenCalledWith('/my-orders?placed=7');
   });
 
-  async function fillAddressAndPlace() {
-    await userEvent.type(await screen.findByLabelText('Full name'), 'Customer Dev');
-    await userEvent.type(screen.getByLabelText('Phone'), '0123456789');
-    await userEvent.type(screen.getByLabelText('Address'), '1 Main St');
-    await userEvent.type(screen.getByLabelText('City'), 'Ho Chi Minh City');
-    await userEvent.type(screen.getByLabelText('Country'), 'Vietnam');
+  it('without saved addresses, a new address from the form is priced and sent', async () => {
+    vi.mocked(addressService.getUserAddresses).mockResolvedValue([]);
+    vi.mocked(orderService.placeOrder).mockResolvedValue(order);
+
+    render(<CheckoutPage />);
+    const place = await screen.findByRole('button', { name: 'Place order' });
+    expect(place).toBeDisabled();
+    await userEvent.type(await screen.findByLabelText('Contact name *'), 'Customer Dev');
+    await userEvent.type(screen.getByLabelText('Phone *'), '0123456789');
+    await userEvent.type(screen.getByLabelText('Address *'), '1 Main St');
+    await screen.findByRole('option', { name: 'United States' });
+    await userEvent.selectOptions(screen.getByLabelText('Country *'), '2');
+    await userEvent.click(screen.getByRole('button', { name: 'Use this address' }));
+
+    const typed = expect.objectContaining({ contactName: 'Customer Dev', addressLine1: '1 Main St', countryId: 2 });
+    expect(await screen.findByTestId('new-address')).toHaveTextContent('Customer Dev, 1 Main St');
+    expect(orderService.previewOrder).toHaveBeenCalledWith('c-1', { shippingAddressPostVm: typed });
+    await waitFor(() => expect(place).toBeEnabled());
+    await userEvent.click(place);
+    expect(orderService.placeOrder).toHaveBeenCalledWith(expect.objectContaining({ shippingAddressPostVm: typed }));
+  });
+
+  it('cannot place the order when tax cannot be calculated', async () => {
+    vi.mocked(orderService.previewOrder).mockRejectedValue(new ApiError(500, {}));
+
+    render(<CheckoutPage />);
+
+    expect(await screen.findByText('Tax could not be calculated right now. Please try again later.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Place order' })).toBeDisabled();
+    expect(screen.getByTestId('checkout-total')).toHaveTextContent('—');
+  });
+
+  async function placeWithDefaultAddress() {
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Place order' })).toBeEnabled());
     await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
   }
 
   it('an expired session while placing the order shows the login link', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
     vi.mocked(orderService.placeOrder).mockRejectedValue(new ApiError(401, {}));
 
     render(<CheckoutPage />);
-    await fillAddressAndPlace();
+    await placeWithDefaultAddress();
 
     expect(await screen.findByRole('link', { name: 'Log in again' })).toBeInTheDocument();
   });
 
   it('an already ordered checkout points to my orders', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
-    vi.mocked(orderService.placeOrder).mockRejectedValue(new ApiError(400, { detail: 'already ordered' }));
+    vi.mocked(orderService.placeOrder).mockRejectedValue(
+      new ApiError(400, { detail: 'Checkout c-1 has already been ordered' })
+    );
 
     render(<CheckoutPage />);
-    await fillAddressAndPlace();
+    await placeWithDefaultAddress();
 
     expect(await screen.findByRole('link', { name: 'See my orders' })).toHaveAttribute('href', '/my-orders');
   });
 
-  it('limits the note to 255 characters', async () => {
-    vi.mocked(orderService.getCheckout).mockResolvedValue(checkout);
+  it('not enough stock shows the server message and a way back to the cart', async () => {
+    vi.mocked(orderService.placeOrder).mockRejectedValue(
+      new ApiError(400, { detail: 'Not enough stock for Galaxy S24 Violet (product 25)' })
+    );
 
+    render(<CheckoutPage />);
+    await placeWithDefaultAddress();
+
+    expect(await screen.findByText(/Not enough stock for Galaxy S24 Violet/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to the cart' })).toHaveAttribute('href', '/cart');
+  });
+
+  it('limits the note to 255 characters', async () => {
     render(<CheckoutPage />);
 
     expect(await screen.findByLabelText('Note (optional)')).toHaveAttribute('maxLength', '255');
@@ -181,6 +252,15 @@ describe('My orders page', () => {
     expect(screen.getByText('Pending payment')).toBeInTheDocument();
     expect(screen.getByTestId('order-total-7')).toHaveTextContent('$1,638.00');
     expect(screen.getByText(/Galaxy S24 Violet/)).toBeInTheDocument();
+  });
+
+  it('shows the tax included in the total', async () => {
+    vi.mocked(orderService.getMyOrders).mockResolvedValue([{ ...order, tax: 163.8, totalPrice: 1801.8 }]);
+
+    render(<MyOrdersPage />);
+
+    expect(await screen.findByTestId('order-tax-7')).toHaveTextContent('incl. tax $163.80');
+    expect(screen.getByTestId('order-total-7')).toHaveTextContent('$1,801.80');
   });
 
   it('confirms a just-placed order', async () => {

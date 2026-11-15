@@ -33,6 +33,21 @@ describe('getCartLines', () => {
     expect(productService.getProductsByIds).toHaveBeenCalledWith([1, 2, 3]);
   });
 
+  it('carries the stock of tracked products only', async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      { customerId: 'u', productId: 1, quantity: 2 },
+      { customerId: 'u', productId: 2, quantity: 1 },
+    ]);
+    vi.mocked(productService.getProductsByIds).mockResolvedValue([
+      { id: 1, name: 'A', slug: 'a', thumbnailUrl: '', price: 1, stockTrackingEnabled: true, stockQuantity: 4 },
+      { id: 2, name: 'B', slug: 'b', thumbnailUrl: '', price: 1, stockTrackingEnabled: false, stockQuantity: null },
+    ]);
+
+    const lines = await getCartLines();
+
+    expect(lines.map((line) => line.stockQuantity)).toEqual([4, undefined]);
+  });
+
   it('empty cart makes no product lookup', async () => {
     vi.mocked(api.get).mockResolvedValue([]);
 
