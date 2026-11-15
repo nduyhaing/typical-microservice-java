@@ -26,6 +26,8 @@
         <module>customer</module>
         <module>order</module>
         <module>media</module>
+        <module>location</module>
+        <module>tax</module>
     </modules>
 
     <properties>
