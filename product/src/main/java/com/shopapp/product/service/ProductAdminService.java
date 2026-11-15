@@ -37,6 +37,7 @@ import com.shopapp.product.viewmodel.product.ProductVariationPutVm;
 import com.shopapp.product.viewmodel.product.ProductVariationSaveVm;
 import com.shopapp.product.viewmodel.productoption.ProductOptionValuePostVm;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -87,7 +88,7 @@ public class ProductAdminService {
     }
 
     public ProductDetailVm getProduct(long id) {
-        Product product = findProduct(id);
+        Product product = findEditableProduct(id);
         List<CategoryGetVm> categories = product.getProductCategories().stream()
             .map(ProductCategory::getCategory)
             .map(category -> new CategoryGetVm(category.getId(), category.getName(), category.getSlug(),
@@ -178,7 +179,7 @@ public class ProductAdminService {
 
     @Transactional
     public void update(long id, ProductPutVm productPutVm) {
-        Product product = findProduct(id);
+        Product product = findEditableProduct(id);
         validate(productPutVm, product);
         List<ProductVariationPutVm> variations = orEmpty(productPutVm.variations());
         List<ProductVariationPutVm> newVariations = variations.stream().filter(v -> v.id() == null).toList();
@@ -199,6 +200,9 @@ public class ProductAdminService {
                 replaceImages(variation, variationVm.productImageIds());
             }
         }
+        if (productPutVm.variations() != null) {
+            deleteVariationsLeftOut(existingVariations.values(), variations);
+        }
         // Variations can be ordered exactly when their parent can (YAS leaves variations "not allowed to order").
         existingVariations.values().forEach(variation -> variation.setAllowedToOrder(product.isAllowedToOrder()));
 
@@ -208,8 +212,26 @@ public class ProductAdminService {
         if (!newVariations.isEmpty()) {
             createVariations(product, newVariations, optionsById, productPutVm.productOptionValues());
             product.setHasOptions(true);
+        } else if (productPutVm.variations() != null && product.isHasOptions()
+            && existingVariations.values().stream().noneMatch(Product::isPublished)) {
+            // every variation removed: the product is sold on its own again
+            product.setHasOptions(false);
         }
         productRepository.save(product);
+    }
+
+    /**
+     * A variation removed in the editor (left out of {@code variations}) is soft-deleted like {@link #delete}: it can
+     * no longer be shown or ordered and loses its option combinations (decisions.md 3a-31). YAS ignores it.
+     */
+    private void deleteVariationsLeftOut(Collection<Product> existing, List<ProductVariationPutVm> requested) {
+        Set<Long> keptIds = requested.stream().map(ProductVariationPutVm::id).filter(Objects::nonNull)
+            .collect(Collectors.toSet());
+        for (Product variation : existing) {
+            if (variation.isPublished() && !keptIds.contains(variation.getId())) {
+                softDelete(variation);
+            }
+        }
     }
 
     /**
@@ -218,7 +240,10 @@ public class ProductAdminService {
      */
     @Transactional
     public void delete(Long id) {
-        Product product = findProduct(id);
+        softDelete(findProduct(id));
+    }
+
+    private void softDelete(Product product) {
         product.setPublished(false);
         if (product.getParent() != null) {
             productOptionCombinationRepository.deleteAll(productOptionCombinationRepository.findAllByProduct(product));
@@ -229,6 +254,15 @@ public class ProductAdminService {
     private Product findProduct(Long id) {
         return productRepository.findById(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
+    }
+
+    /** A variation is edited through its parent's form, never on its own (decisions.md 3a-34). */
+    private Product findEditableProduct(Long id) {
+        Product product = findProduct(id);
+        if (product.getParent() != null) {
+            throw new BadRequestException(Constants.ErrorCode.EDIT_THE_PARENT_PRODUCT, id);
+        }
+        return product;
     }
 
     private Brand findBrand(Long brandId) {

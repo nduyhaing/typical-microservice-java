@@ -16,6 +16,7 @@ import com.shopapp.product.model.Category;
 import com.shopapp.product.model.Product;
 import com.shopapp.product.support.AbstractStorefrontIT;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -378,6 +379,73 @@ class ProductAdminIT extends AbstractStorefrontIT {
             .andExpect(jsonPath("$[?(@.slug == 'galaxy-s24-amber')].price").value(829.0));
         mockMvc.perform(get("/storefront/product-option-combinations/{id}/values", id))
             .andExpect(jsonPath("$[*].productOptionValue").value(containsInAnyOrder("Black", "Violet", "Amber")));
+    }
+
+    /** Shirt with option Color and the given variations (id or new) as an update/create body. */
+    private static String shirt(long colorId, String variations, String values) {
+        return "{\"name\":\"Shirt\",\"slug\":\"shirt\",\"sku\":\"SH\",\"price\":20,"
+            + "\"isAllowedToOrder\":true,\"isPublished\":true,\"isVisibleIndividually\":true,\"categoryIds\":[],"
+            + "\"variations\":[" + variations + "],"
+            + "\"productOptionValues\":[{\"productOptionId\":" + colorId + ",\"displayOrder\":1,"
+            + "\"value\":[" + values + "]}]}";
+    }
+
+    private static String shirtVariation(Long id, long colorId, String color) {
+        return "{" + (id == null ? "" : "\"id\":" + id + ",") + "\"name\":\"Shirt " + color + "\","
+            + "\"slug\":\"shirt-" + color.toLowerCase(Locale.ROOT) + "\",\"sku\":\"SH-" + color + "\",\"price\":20,"
+            + "\"optionValuesByOptionId\":{\"" + colorId + "\":\"" + color + "\"}}";
+    }
+
+    @Test
+    void updateProduct_variationLeftOut_isDeleted() throws Exception {
+        long colorId = createOption("Color");
+        String created = mockMvc.perform(json(post("/backoffice/products"), shirt(colorId,
+                shirtVariation(null, colorId, "Red") + "," + shirtVariation(null, colorId, "Blue"),
+                "\"Red\",\"Blue\"")).with(admin()))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        long id = ((Number) JsonPath.read(created, "$.id")).longValue();
+        String variationsJson = mockMvc.perform(get("/backoffice/product-variations/{id}", id).with(admin()))
+            .andReturn().getResponse().getContentAsString();
+        long redId = idOf(variationsJson, "shirt-red");
+        long blueId = idOf(variationsJson, "shirt-blue");
+
+        mockMvc.perform(json(put("/backoffice/products/{id}", id),
+                shirt(colorId, shirtVariation(redId, colorId, "Red"), "\"Red\"")).with(admin()))
+            .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/storefront/product-variations/{id}", id))
+            .andExpect(jsonPath("$[*].slug").value(containsInAnyOrder("shirt-red")));
+        mockMvc.perform(get("/storefront/product-option-combinations/{id}/values", id))
+            .andExpect(jsonPath("$[*].productOptionValue").value(containsInAnyOrder("Red")));
+        mockMvc.perform(get("/backoffice/product-variations/{id}", id).with(admin()))
+            .andExpect(jsonPath("$[*].slug").value(containsInAnyOrder("shirt-red")));
+        // the removed variation can no longer be ordered
+        mockMvc.perform(get("/products").param("ids", String.valueOf(blueId)).with(jwt()))
+            .andExpect(jsonPath("$.productCheckoutListVms", hasSize(0)));
+    }
+
+    @Test
+    void variation_cannotBeEditedOrReadDirectly_returns400() throws Exception {
+        long colorId = createOption("Color");
+        long id = createGalaxyWithVariations(colorId);
+        String variationsJson = mockMvc.perform(get("/backoffice/product-variations/{id}", id).with(admin()))
+            .andReturn().getResponse().getContentAsString();
+        long blackId = idOf(variationsJson, "galaxy-s24-black");
+
+        mockMvc.perform(get("/backoffice/products/{id}", blackId).with(admin()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Product " + blackId
+                + " is a variation; edit its parent product instead"));
+        mockMvc.perform(json(put("/backoffice/products/{id}", blackId),
+                simple("Galaxy S24 Black", "galaxy-s24-black", "GS24-B", 1, null, "[]")).with(admin()))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.detail").value("Product " + blackId
+                + " is a variation; edit its parent product instead"));
+        // unchanged: still hidden from lists and priced as before
+        mockMvc.perform(get("/storefront/product-variations/{id}", id))
+            .andExpect(jsonPath("$[?(@.slug == 'galaxy-s24-black')].price").value(799.0));
+        mockMvc.perform(get("/storefront/product/galaxy-s24-black")).andExpect(status().isNotFound());
     }
 
     @Test

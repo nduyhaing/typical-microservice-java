@@ -7,7 +7,7 @@ import Table from 'react-bootstrap/Table';
 import ErrorMessage from '../../../common/components/ErrorMessage';
 import { ProductOption } from '../models/Product';
 import { createProductOption } from '../services/ProductOptionService';
-import { generateVariations, parseValues, VariationRow } from '../utils/variations';
+import { generateVariations, isValidPrice, parseValues, VariationRow } from '../utils/variations';
 
 /** An option chosen for the product with the admin's comma-separated values. */
 export type OptionInput = { id: number; name: string; valuesText: string };
@@ -23,8 +23,10 @@ type Props = {
   onSelectedChange: (selected: OptionInput[]) => void;
   variations: VariationInput[];
   onVariationsChange: (variations: VariationInput[]) => void;
-  /** Product values the generated variations start from. */
-  product: { name: string; sku: string; price: number };
+  /** Product values the generated variations start from; the price as typed (blank stays blank, never 0). */
+  product: { name: string; sku: string; price: string };
+  /** Mark variation prices that are not a number of 0 or more (set once a save was tried). */
+  showPriceErrors?: boolean;
 };
 
 export const toVariationInput = (row: VariationRow): VariationInput => ({ ...row, price: String(row.price) });
@@ -34,7 +36,7 @@ export const toVariationInput = (row: VariationRow): VariationInput => ({ ...row
  * variation per combination, then adjust each variation's name, slug, SKU and price.
  */
 export default function ProductVariations(props: Props) {
-  const { options, selected, variations, onSelectedChange, onVariationsChange, product } = props;
+  const { options, selected, variations, onSelectedChange, onVariationsChange, product, showPriceErrors } = props;
   const [choice, setChoice] = useState('');
   const [newOption, setNewOption] = useState('');
   const [warning, setWarning] = useState<string>();
@@ -87,9 +89,11 @@ export default function ProductVariations(props: Props) {
       return;
     }
     setWarning(undefined);
-    const existing = variations.map((v) => ({ ...v, price: Number(v.price) || 0 }));
-    const all = generateVariations(product.name, product.sku, product.price, chosen, existing);
-    onVariationsChange([...variations, ...all.slice(existing.length).map(toVariationInput)]);
+    // prices only matter for the new rows, which take the product price as typed
+    const existing = variations.map((v) => ({ ...v, price: 0 }));
+    const all = generateVariations(product.name, product.sku, 0, chosen, existing);
+    const added = all.slice(existing.length).map((row) => ({ ...toVariationInput(row), price: product.price }));
+    onVariationsChange([...variations, ...added]);
   }
 
   const update = (index: number, patch: Partial<VariationInput>) =>
@@ -205,7 +209,9 @@ export default function ProductVariations(props: Props) {
                       type="number"
                       min={0}
                       step="0.01"
+                      required
                       aria-label={`${label} price`}
+                      isInvalid={showPriceErrors && !isValidPrice(variation.price)}
                       value={variation.price}
                       onChange={(e) => update(index, { price: e.target.value })}
                     />

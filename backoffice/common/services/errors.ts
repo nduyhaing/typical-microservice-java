@@ -17,7 +17,7 @@ export function toErrorInfo(error: unknown): ErrorInfo {
     return { message: GENERIC, fieldErrors: [] };
   }
   if (error.status === 401) {
-    // backoffice-bff answers 401 to /api calls once the session is gone (2b-13); a reload goes through the login
+    // backoffice-bff answers 401 JSON to /api calls without a usable session (2b-13, 3a-2); a reload logs in
     return { message: 'Your session has expired. Reload the page to log in again.', fieldErrors: [] };
   }
   if (error.status === 403) {

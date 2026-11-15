@@ -21,22 +21,10 @@ export const updateProduct = (id: number, product: ProductPayload) => put<null>(
 export const deleteProduct = (id: number) => del(`${base}/products/${id}`);
 
 /**
- * Ids of the product's related products, so an update keeps them (the form does not edit them yet). YAS's back office
- * path first; this API may only have the storefront one, which lists published related products of a published
- * product.
+ * Ids of all the product's related products (published or not), so an update keeps them: the form does not edit them
+ * yet and an update replaces the list (3a-19, 3a-35). A failure rejects, so the edit page cannot be saved.
  */
 export async function getRelatedProductIds(id: number): Promise<number[]> {
-  try {
-    const related = await get<{ id: number }[]>(`${base}/products/related-products/${id}`);
-    return related.map((p) => p.id);
-  } catch {
-    try {
-      const page = await get<{ productContent: { id: number }[] }>(
-        `/product/storefront/products/related-products/${id}?pageNo=0&pageSize=100`
-      );
-      return page.productContent.map((p) => p.id);
-    } catch {
-      return [];
-    }
-  }
+  const related = await get<{ id: number }[]>(`${base}/products/related-products/${id}`);
+  return related.map((p) => p.id);
 }

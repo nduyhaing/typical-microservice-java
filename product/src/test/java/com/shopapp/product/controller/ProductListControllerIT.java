@@ -183,4 +183,31 @@ class ProductListControllerIT extends AbstractStorefrontIT {
         mockMvc.perform(get("/storefront/products/list-featured").param("productId", String.valueOf(b.getId())))
             .andExpect(jsonPath("$[0].name").value("B"));
     }
+
+    @Test
+    void listFeatured_omitsVariationsOfUnpublishedParent() throws Exception {
+        Product shirt = fixtures.product("Shirt", "shirt", 20);
+        Product red = fixtures.variation(shirt, "Shirt Red", "shirt-red", 20);
+        Product other = fixtures.product("Other", "other", 5);
+        Product otherBlue = fixtures.variation(other, "Other Blue", "other-blue", 5);
+        shirt.setPublished(false);
+        fixtures.save(shirt);
+
+        mockMvc.perform(get("/storefront/products/list-featured")
+                .param("productId", String.valueOf(red.getId()), String.valueOf(otherBlue.getId())))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[*].slug").value(containsInAnyOrder("other-blue")));
+    }
+
+    @Test
+    void relatedProducts_ofVariationOfUnpublishedParent_returns404() throws Exception {
+        Product shirt = fixtures.product("Shirt", "shirt", 20);
+        Product red = fixtures.variation(shirt, "Shirt Red", "shirt-red", 20);
+        fixtures.related(red, fixtures.product("Tie", "tie", 5));
+        shirt.setPublished(false);
+        fixtures.save(shirt);
+
+        mockMvc.perform(get("/storefront/products/related-products/{id}", red.getId()))
+            .andExpect(status().isNotFound());
+    }
 }

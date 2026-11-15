@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
@@ -35,6 +36,30 @@ class AdminAccessTest {
         client.get().uri("/authentication").exchange()
             .expectStatus().is3xxRedirection()
             .expectHeader().location("/oauth2/authorization/keycloak");
+    }
+
+    @Test
+    void anonymous_apiGet_isUnauthorizedJson() {
+        client.get().uri("/api/product/backoffice/brands").exchange()
+            .expectStatus().isUnauthorized()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody()
+            .jsonPath("$.statusCode").isEqualTo("401 UNAUTHORIZED")
+            .jsonPath("$.title").isEqualTo("Unauthorized")
+            .jsonPath("$.detail").isEqualTo("Your session has expired. Please log in again.")
+            .jsonPath("$.fieldErrors").isEmpty();
+    }
+
+    @Test
+    void anonymous_sameOriginApiPost_isUnauthorizedJson() {
+        client.post().uri("http://localhost/api/product/backoffice/brands")
+            .header("Origin", "http://localhost").header("Sec-Fetch-Site", "same-origin")
+            .contentType(MediaType.APPLICATION_JSON).bodyValue("{\"name\":\"x\",\"slug\":\"x\"}")
+            .exchange()
+            .expectStatus().isUnauthorized()
+            .expectHeader().contentType(MediaType.APPLICATION_JSON)
+            .expectBody()
+            .jsonPath("$.detail").isEqualTo("Your session has expired. Please log in again.");
     }
 
     @Test

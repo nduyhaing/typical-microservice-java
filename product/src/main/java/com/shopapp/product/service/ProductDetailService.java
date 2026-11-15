@@ -62,7 +62,7 @@ public class ProductDetailService {
     }
 
     public List<ProductVariationGetVm> getProductVariationsByParentId(Long id) {
-        Product parent = productRepository.findByIdAndIsPublishedTrue(id)
+        Product parent = productRepository.findStorefrontById(id)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, id));
         if (!parent.isHasOptions()) {
             return List.of();
@@ -75,7 +75,7 @@ public class ProductDetailService {
 
     /** The distinct option/value pairs used by the product's variations (YAS de-duplicates the same way). */
     public List<ProductOptionCombinationGetVm> getOptionValues(Long productId) {
-        Product product = productRepository.findByIdAndIsPublishedTrue(productId)
+        Product product = productRepository.findStorefrontById(productId)
             .orElseThrow(() -> new NotFoundException(Constants.ErrorCode.PRODUCT_NOT_FOUND, productId));
         Map<List<Object>, ProductOptionCombinationGetVm> distinct = new LinkedHashMap<>();
         productOptionCombinationRepository.findAllByParentProductId(product.getId()).stream()

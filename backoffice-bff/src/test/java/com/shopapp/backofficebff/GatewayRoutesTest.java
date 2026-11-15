@@ -113,8 +113,11 @@ class GatewayRoutesTest {
     @Test
     void anonymous_neverReachesBackends() {
         client.get().uri("/api/product/backoffice/brands").exchange()
+            .expectStatus().isUnauthorized();
+        client.get().uri("/catalog/products").exchange()
             .expectStatus().is3xxRedirection();
 
         assertThat(API_PATH.get()).isNull();
+        assertThat(BACKOFFICE_PATH.get()).isNull();
     }
 }

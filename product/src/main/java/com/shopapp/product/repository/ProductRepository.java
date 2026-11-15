@@ -26,6 +26,18 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findByIdAndIsPublishedTrue(Long id);
 
     /**
+     * Storefront id lookups: published, and a variation also needs a published parent (its own flag only means
+     * "not deleted", decisions.md 3a-17, 3a-33).
+     */
+    @Query("SELECT p FROM Product p LEFT JOIN p.parent parent WHERE p.id IN :productIds AND p.isPublished = TRUE "
+        + "AND (parent IS NULL OR parent.isPublished = TRUE) ORDER BY p.id ASC")
+    List<Product> findStorefrontByIds(@Param("productIds") List<Long> productIds);
+
+    @Query("SELECT p FROM Product p LEFT JOIN p.parent parent WHERE p.id = :id AND p.isPublished = TRUE "
+        + "AND (parent IS NULL OR parent.isPublished = TRUE)")
+    Optional<Product> findStorefrontById(@Param("id") Long id);
+
+    /**
      * Products that can be put in an order (decisions.md 2c-2): published, allowed to order, and not a parent with
      * options (only its variations can be bought). A variation also needs a published parent (decisions.md 3a-17).
      */
@@ -37,10 +49,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findByGtinAndIsPublishedTrue(String gtin);
 
     Optional<Product> findBySkuAndIsPublishedTrue(String sku);
-
-
-
-    List<Product> findAllByIdIn(List<Long> productIds);
 
     /** Back office: a brand in use by any product (published or not) cannot be deleted. */
     boolean existsByBrandId(Long brandId);

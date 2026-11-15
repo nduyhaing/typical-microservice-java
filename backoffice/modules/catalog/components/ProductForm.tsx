@@ -13,6 +13,7 @@ import { getBrands } from '../services/BrandService';
 import { getCategories } from '../services/CategoryService';
 import { getProductOptions } from '../services/ProductOptionService';
 import {
+  isValidPrice,
   optionsFromVariations,
   toProductOptionValueDisplays,
   toProductOptionValues,
@@ -147,7 +148,8 @@ export function toPayload(values: ProductFormValues, isNew: boolean): ProductPay
     name: variation.name.trim(),
     slug: variation.slug.trim(),
     sku: variation.sku.trim(),
-    price: Number(variation.price) || 0,
+    // the form refuses blank or negative prices before this (isValidPrice), so no blank ever becomes 0
+    price: Number(variation.price),
   }));
   const productOptionValues = toProductOptionValues(variations);
   return {
@@ -155,7 +157,7 @@ export function toPayload(values: ProductFormValues, isNew: boolean): ProductPay
     slug: values.slug.trim(),
     sku: values.sku.trim(),
     gtin: values.gtin.trim(),
-    price: Number(values.price) || 0,
+    price: Number(values.price),
     shortDescription: values.shortDescription,
     description: values.description,
     brandId: values.brandId ? Number(values.brandId) : null,
@@ -179,6 +181,8 @@ type Props = {
   onSubmit: (payload: ProductPayload) => Promise<void>;
 };
 
+const PRICE_REQUIRED = 'Enter a price of 0 or more for the product and every variation.';
+
 const FLAGS = [
   ['isPublished', 'Published'],
   ['isFeatured', 'Featured'],
@@ -195,6 +199,7 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
   const [error, setError] = useState<unknown>();
   const [invalid, setInvalid] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const [priceChecked, setPriceChecked] = useState(false);
   const { data: brands } = useFetch(getBrands);
   const { data: categories } = useFetch(getCategories);
   const { data: loadedOptions } = useFetch(getProductOptions);
@@ -208,8 +213,9 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
       setInvalid('Name and slug are required.');
       return;
     }
-    if (Number(values.price) < 0 || values.variations.some((v) => Number(v.price) < 0)) {
-      setInvalid('Prices cannot be negative.');
+    if (!isValidPrice(values.price) || values.variations.some((v) => !isValidPrice(v.price))) {
+      setPriceChecked(true);
+      setInvalid(PRICE_REQUIRED);
       return;
     }
     setInvalid(undefined);
@@ -268,9 +274,12 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
             type="number"
             min={0}
             step="0.01"
+            required
+            isInvalid={priceChecked && !isValidPrice(values.price)}
             value={values.price}
             onChange={(e) => set({ price: e.target.value })}
           />
+          <Form.Control.Feedback type="invalid">Enter a price of 0 or more.</Form.Control.Feedback>
         </Form.Group>
         <Form.Group as={Col} md={12} controlId="product-short-description">
           <Form.Label>Short description</Form.Label>
@@ -332,7 +341,8 @@ export default function ProductForm({ initial, isNew, onSubmit }: Props) {
         onSelectedChange={(selected) => set({ options: selected })}
         variations={values.variations}
         onVariationsChange={(variations) => set({ variations })}
-        product={{ name: values.name, sku: values.sku, price: Number(values.price) || 0 }}
+        product={{ name: values.name, sku: values.sku, price: values.price }}
+        showPriceErrors={priceChecked}
       />
 
       <Button type="submit" disabled={saving}>

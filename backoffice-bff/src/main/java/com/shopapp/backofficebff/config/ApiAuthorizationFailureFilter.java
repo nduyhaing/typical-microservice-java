@@ -37,7 +37,8 @@ public class ApiAuthorizationFailureFilter implements WebFilter, Ordered {
             exchange.getSession().flatMap(WebSession::invalidate).then(writeUnauthorized(exchange.getResponse())));
     }
 
-    private static Mono<Void> writeUnauthorized(ServerHttpResponse response) {
+    /** Writes the 401 JSON body; also the anonymous {@code /api/**} entry point (decisions.md 3a-2). */
+    static Mono<Void> writeUnauthorized(ServerHttpResponse response) {
         response.setStatusCode(HttpStatus.UNAUTHORIZED);
         response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         DataBuffer body = response.bufferFactory().wrap(BODY.getBytes(StandardCharsets.UTF_8));

@@ -260,6 +260,34 @@ describe('Create product', () => {
     expect(payload.productOptionValues).toEqual([{ productOptionId: 1, displayType: 'text', displayOrder: 1, value: ['Porcelain'] }]);
   });
 
+  it('a blank product price is refused, never sent as 0', async () => {
+    render(<ProductCreatePage />);
+    await fillGeneral();
+    await userEvent.clear(screen.getByLabelText('Price'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByText('Enter a price of 0 or more for the product and every variation.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Price')).toBeInvalid();
+    expect(productService.createProduct).not.toHaveBeenCalled();
+  });
+
+  it('generated variations of a product without price have a blank price, which is refused', async () => {
+    render(<ProductCreatePage />);
+    await fillGeneral();
+    await userEvent.clear(screen.getByLabelText('Price'));
+    await userEvent.selectOptions(screen.getByLabelText('Option'), 'Color');
+    await userEvent.click(screen.getByRole('button', { name: 'Add option' }));
+    await userEvent.type(screen.getByLabelText('Color values'), 'Obsidian');
+    await userEvent.click(screen.getByRole('button', { name: 'Generate variations' }));
+    expect(screen.getByLabelText('Variation 1 price')).toHaveValue(null);
+    await userEvent.type(screen.getByLabelText('Price'), '799');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByText('Enter a price of 0 or more for the product and every variation.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Variation 1 price')).toBeInvalid();
+    expect(productService.createProduct).not.toHaveBeenCalled();
+  });
+
   it('shows the 400 detail and field errors', async () => {
     vi.mocked(productService.createProduct).mockRejectedValue(
       new ApiError(400, { statusCode: '400 BAD_REQUEST', title: 'Bad Request', detail: 'Slug pixel-9 is already existed or is duplicated', fieldErrors: ['price: must be at least 0'] })
@@ -391,6 +419,26 @@ describe('Edit product', () => {
       ],
     });
     expect(push).toHaveBeenCalledWith('/catalog/products');
+  });
+
+  it('a failed related-products lookup fails the page load, so nothing can be saved', async () => {
+    vi.mocked(productService.getRelatedProductIds).mockRejectedValue(new ApiError(500, null));
+
+    render(<ProductEditPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong');
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+    expect(productService.updateProduct).not.toHaveBeenCalled();
+  });
+
+  it('a variation price cleared to blank is refused, never sent as 0', async () => {
+    render(<ProductEditPage />);
+    const price = await screen.findByLabelText('Variation 2 price');
+    await userEvent.clear(price);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(screen.getByText('Enter a price of 0 or more for the product and every variation.')).toBeInTheDocument();
+    expect(productService.updateProduct).not.toHaveBeenCalled();
   });
 
   it('shows the error when the product does not exist', async () => {

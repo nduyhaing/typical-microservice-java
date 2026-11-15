@@ -126,3 +126,12 @@ export function toVariationRow(variation: ProductVariationGet): VariationRow {
     optionValuesByOptionId: Object.fromEntries(Object.entries(variation.options ?? {}).map(([id, v]) => [Number(id), v])),
   };
 }
+
+/** A price as typed: required, a number, 0 or more (a blank price must never become 0, i.e. free). */
+export function isValidPrice(text: string): boolean {
+  if (!text.trim()) {
+    return false;
+  }
+  const price = Number(text);
+  return Number.isFinite(price) && price >= 0;
+}
