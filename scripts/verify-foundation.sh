@@ -186,7 +186,9 @@ check_checkout_and_order() {
         return
     fi
     pass "checkout priced by the server (2 x 819.00)"
-    order_id=$(curl -s -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"checkoutId\":\"$(python -c "import json,sys;print(json.load(sys.stdin)['id'])" <<< "$checkout")\",\"paymentMethod\":\"COD\",\"totalPrice\":1,\"shippingAddressPostVm\":{\"contactName\":\"Customer Dev\",\"phone\":\"0123456789\",\"addressLine1\":\"1 Main St\",\"city\":\"Ho Chi Minh City\",\"countryName\":\"Vietnam\"}}"         "$(url storefront /api/order/storefront/orders)"         | python -c "import json,sys;o=json.load(sys.stdin);print(o['id'] if o.get('orderStatus')=='PENDING_PAYMENT' and o.get('totalPrice')==1638.0 else '')" || true)
+    # typed addresses take a country id from location (3c-42); Galaxy S24 has no tax class, so the total is untaxed
+    vn_id=$(curl -s "$(url api /location/storefront/countries)"         | python -c "import json,sys;print(next(c['id'] for c in json.load(sys.stdin) if c['code2']=='VN'))" || true)
+    order_id=$(curl -s -b "$COOKIE_JAR" -H 'Content-Type: application/json'         -d "{\"checkoutId\":\"$(python -c "import json,sys;print(json.load(sys.stdin)['id'])" <<< "$checkout")\",\"paymentMethod\":\"COD\",\"totalPrice\":1,\"shippingAddressPostVm\":{\"contactName\":\"Customer Dev\",\"phone\":\"0123456789\",\"addressLine1\":\"1 Main St\",\"city\":\"Ho Chi Minh City\",\"countryId\":$vn_id}}"         "$(url storefront /api/order/storefront/orders)"         | python -c "import json,sys;o=json.load(sys.stdin);print(o['id'] if o.get('orderStatus')=='PENDING_PAYMENT' and float(o.get('totalPrice') or 0)==1638.0 else '')" || true)
     if [ -n "$order_id" ]; then
         pass "order placed as PENDING_PAYMENT with the server total (client total ignored)"
     else
