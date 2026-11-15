@@ -14,7 +14,7 @@ The system is built in slices; each ends in something that runs end to end.
 3. Back office, in three steps:
    - **3a Back office + catalog admin** — backoffice-bff (ADMIN only), back office app, brands/categories/products admin *(done)*
    - **3b Media** — media service, image upload in the back office, product images on the storefront *(done)*
-   - 3c Inventory, tax, location — stock, tax rates, saved addresses at checkout
+   - **3c Inventory, tax, location** — stock, tax rates, saved addresses at checkout *(done — slice 3 complete)*
 4. Events & search: Debezium CDC → Kafka, search (Elasticsearch), promotion, rating
 5. Payments & the rest: payment, payment-paypal, delivery, webhook, recommendation, sampledata
 6. Operations: observability (OTel, Prometheus, Grafana, Loki, Tempo), Kubernetes, CI
@@ -57,9 +57,10 @@ Notes:
 - **Login**: the storefront's "Log in" goes through storefront-bff to Keycloak. The BFF keeps the tokens in its
   Redis-backed session and relays the access token to the APIs; the browser only has a session cookie.
   Logging out also ends the Keycloak session.
-- **Checkout**: cart → Checkout → shipping address → Place order. Orders are saved as "Pending payment" with
-  server-computed prices; tax, discounts, shipping fees and real payments come in later slices (cash on delivery
-  only for now).
+- **Checkout**: cart → Checkout → shipping address (saved or typed) → Place order. Orders are saved as "Pending
+  payment" with server-computed prices and tax; discounts, shipping fees and real payments come in later slices
+  (cash on delivery only for now).
+- **Tax, stock and addresses** (slice 3c, `decisions.md` 3c-*): see [Tax, stock and addresses](#tax-stock-and-addresses).
 - **Images**: in the back office, the product form's thumbnail and gallery and the category form's image upload a
   file as soon as it is chosen (PNG, JPEG or GIF, up to **10 MB**; the type is checked by decoding the image,
   not by its name). Images are served by the media service at
@@ -80,6 +81,33 @@ Notes:
   only read on first start; after editing them, run `docker compose down -v`.
 - To change the domain, edit `DOMAIN` in `.env` (and your hosts file) — nginx and the Keycloak realm
   read it from there.
+
+## Tax, stock and addresses
+
+- **Locations** (location service): countries, states/provinces and districts, edited in the back office under
+  *Location* (districts are read-only). The storefront reads them anonymously
+  (`GET /location/storefront/countries`, `/state-or-provinces/{countryId}`, `/district/{stateId}`).
+- **Tax** (tax service): an admin creates **tax classes** and **rates** (percent) for a class at a country, optionally
+  narrowed to a state/province and a zip code, and gives a product a class on the product form ("None" = untaxed).
+  At checkout the **most specific rate wins**: country + state + zip, then country + zip, then country + state, then
+  country only; no matching rate = 0 % (`decisions.md` 3c-11). Prices are always before tax; the tax is computed
+  per line on the server (`BigDecimal`, rounded half-up to cents) and shown in the checkout summary and on the order.
+- **Stock** — two numbers, on purpose:
+  - the product's **sellable stock** (`stockQuantity` on the product, used only when *stock tracking* is on): what
+    can still be ordered. Placing an order takes from it atomically (never oversold; a failed order gives it back),
+    and the cart refuses more than is in stock;
+  - the **physical stock** per warehouse (inventory service, back office *Inventory → Warehouses / Stock*).
+    Adjustments are **deltas** (+3 received, −2 broken, each with a note and kept in the history) and add the same
+    delta to the sellable stock.
+  - Orders do not touch warehouse rows, so the two drift apart by the units sold but not shipped yet. **Do not book
+    shipped orders out of a warehouse with a normal adjustment**: that removes them from the sellable stock a second
+    time (`decisions.md` 3c-60). Untracked products are always orderable.
+- **Saved addresses**: customers keep an address book (storefront `/address`; customer stores the link,
+  location the address). At checkout they pick a saved address or type a new one (country/state/district from
+  location). Only the caller's own addresses can be used, also for an admin.
+- **Checkout preview**: the checkout page asks order for a preview (`POST /order/storefront/orders/preview`) whenever
+  the address changes, and shows subtotal, tax and total computed by the server; placing the order prices it again
+  and ignores any total from the browser.
 
 ## CDC (change data capture)
 
@@ -140,6 +168,10 @@ publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.p
 | Product API docs | http://api.shopapp.local/product/swagger-ui | |
 | Cart / customer / order APIs | http://api.shopapp.local/cart/..., /customer/..., /order/... | need a Keycloak access token |
 | Media API / images | http://api.shopapp.local/media/medias/{id}, .../medias/{id}/file/{fileName} | GETs public; upload/delete need ADMIN |
+| Location API | http://api.shopapp.local/location/storefront/countries (public lookups), .../location/storefront/addresses, .../location/backoffice/... | lookups public; addresses need a token; `backoffice` needs ADMIN |
+| Tax API | http://api.shopapp.local/tax/backoffice/tax-classes, .../tax/backoffice/tax-rates | ADMIN (order reads rates with the customer's token) |
+| Inventory API | http://api.shopapp.local/inventory/backoffice/warehouses, .../inventory/backoffice/stocks | ADMIN |
+| Back office: location, tax, inventory | http://backoffice.shopapp.local/location/countries, /location/state-or-provinces, /tax/tax-classes, /tax/tax-rates, /inventory/warehouses, /inventory/warehouse-products, /inventory/warehouse-stocks | `admin` / `admin` |
 | Postgres (from host) | `localhost:5432` | `admin` / `admin` |
 | Kafka (from host) | `localhost:29092` | — (in-network: `kafka:9092`) |
 

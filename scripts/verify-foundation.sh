@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect redis product cart customer order media storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect redis product cart customer order media location tax inventory storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -492,6 +492,331 @@ check_cdc() {
     if [ "$status" = "204" ]; then pass "restore the Galaxy A55 name"; else fail "restore the Galaxy A55 name '$original' -> $status (fix by hand)"; fi
 }
 
+# Slice 3c: tax, stock and a saved address at checkout, end to end. Admin calls go through backoffice-bff, the
+# customer's through storefront-bff. Everything is put back afterwards (s3c_cleanup, also from the EXIT trap); only
+# the placed order stays (orders cannot be deleted).
+S3C_TAX_CLASS="Smoke VAT"
+S3C_WAREHOUSE="Smoke Warehouse"
+S3C_ADDRESS_NAME="Smoke Tax Address"
+S3C_ACTIVE=""
+S3C_PRODUCT_ID=""
+S3C_ORIG_DETAIL=""
+S3C_RELATED=""
+S3C_CLASS_ID=""
+S3C_RATE_ID=""
+S3C_WH_ID=""
+S3C_STOCK_ID=""
+S3C_WH_UNITS=0
+S3C_ADDRESS_ID=""
+S3C_LEFTOVER_CLASSES=""
+S3C_LOCK="${TMPDIR:-/tmp}/shopapp-smoke-3c.lock"
+S3C_LOCKED=""
+S3C_JAR=$(mktemp)
+trap 's3c_cleanup >/dev/null 2>&1 || true; s3c_unlock; rm -f "$COOKIE_JAR" "$ADMIN_JAR" "$S3C_JAR"' EXIT
+
+# Two smoke runs at once would read each other's changes as the product's original values: one slice 3c run at a
+# time (a lock directory holding the owner's pid; a dead owner's lock is taken over), waiting up to 3 minutes.
+s3c_lock() {
+    local waited=0 owner
+    while ! mkdir "$S3C_LOCK" 2>/dev/null; do
+        owner=$(cat "$S3C_LOCK/pid" 2>/dev/null || true)
+        if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$S3C_LOCK"; continue; fi
+        [ "$waited" -ge 180 ] && return 1
+        sleep 3
+        waited=$((waited + 3))
+    done
+    echo $$ > "$S3C_LOCK/pid"
+    S3C_LOCKED=yes
+}
+s3c_unlock() { if [ -n "$S3C_LOCKED" ]; then rm -rf "$S3C_LOCK"; S3C_LOCKED=""; fi; }
+
+s3c_origin() { echo "http://backoffice.${DOMAIN}${BASE_URL_SUFFIX}"; }
+# bo <method> <path> [json body]: admin call through backoffice-bff; prints the body, then the status on its own line
+bo() {
+    local method=$1 path=$2 body=${3:-}
+    if [ -n "$body" ]; then
+        curl -s -w '\n%{http_code}' -b "$ADMIN_JAR" -H "Origin: $(s3c_origin)" -X "$method" \
+            -H 'Content-Type: application/json' -d "$body" "$(url backoffice "$path")" || true
+    else
+        curl -s -w '\n%{http_code}' -b "$ADMIN_JAR" -H "Origin: $(s3c_origin)" -X "$method" \
+            "$(url backoffice "$path")" || true
+    fi
+}
+# sf <method> <path> [json body]: customer call through storefront-bff, same output as bo
+sf() {
+    local method=$1 path=$2 body=${3:-}
+    if [ -n "$body" ]; then
+        curl -s -w '\n%{http_code}' -b "$S3C_JAR" -X "$method" -H 'Content-Type: application/json' -d "$body" \
+            "$(url storefront "$path")" || true
+    else
+        curl -s -w '\n%{http_code}' -b "$S3C_JAR" -X "$method" "$(url storefront "$path")" || true
+    fi
+}
+status_of() { tail -n 1 <<< "$1"; }
+body_of() { sed '$d' <<< "$1"; }
+# json <python expression over d> <<< json: prints the value, empty on any error
+json() { python -c "import json,sys
+try:
+    d=json.load(sys.stdin); v=$1
+    print('' if v is None else v)
+except Exception:
+    print('')" 2>/dev/null || true; }
+
+# Product update body from the original admin detail with another tax class and stock tracking flag.
+s3c_product_body() {
+    local thumb tax_class=$1 tracking=$2
+    thumb=$(json "(d.get('thumbnailMedia') or {}).get('id')" <<< "$S3C_ORIG_DETAIL")
+    product_put_body "$S3C_ORIG_DETAIL" "$S3C_RELATED" "$thumb" | python -c "import json,sys
+b=json.load(sys.stdin); t=sys.argv[1]; k=sys.argv[2]
+b['taxClassId']=int(t) if t not in ('', 'None') else None
+b['stockTrackingEnabled']=(k=='True')
+print(json.dumps(b))" "$tax_class" "$tracking"
+}
+
+# Removes what an interrupted earlier run left behind: smoke warehouses (booked out first) and smoke tax classes.
+s3c_preclean() {
+    local ids id stock
+    ids=$(body_of "$(bo GET /api/inventory/backoffice/warehouses)" \
+        | json "' '.join(str(w['id']) for w in d if w['name']=='$S3C_WAREHOUSE')")
+    for id in $ids; do
+        body_of "$(bo GET "/api/inventory/backoffice/stocks?warehouseId=$id")" \
+            | json "'\n'.join(f\"{s['id']} {s['quantity']}\" for s in d if s['quantity'])" \
+            | while read -r stock qty; do
+                [ -n "$stock" ] && bo PUT /api/inventory/backoffice/stocks \
+                    "{\"stockQuantityList\":[{\"stockId\":$stock,\"quantity\":-$qty,\"note\":\"smoke: leftover\"}]}" >/dev/null
+            done
+        bo DELETE "/api/inventory/backoffice/warehouses/$id" >/dev/null
+    done
+    ids=$(body_of "$(bo GET /api/tax/backoffice/tax-classes)" \
+        | json "' '.join(str(c['id']) for c in d if c['name']=='$S3C_TAX_CLASS')")
+    S3C_LEFTOVER_CLASSES=$ids
+    for id in $ids; do
+        for stock in $(body_of "$(bo GET '/api/tax/backoffice/tax-rates/paging?pageSize=100')" \
+            | json "' '.join(str(r['id']) for r in d['taxRateGetDetailContent'] if r['taxClassId']==$id)"); do
+            bo DELETE "/api/tax/backoffice/tax-rates/$stock" >/dev/null
+        done
+        bo DELETE "/api/tax/backoffice/tax-classes/$id" >/dev/null
+    done
+}
+
+s3c_flow() {
+    local base vn_id r detail sellable checkout checkout_id preview order body
+    if [ "$(backoffice_auth_status "$ADMIN_JAR" "$(url backoffice "")" || true)" != "200" ] \
+        && ! backoffice_login "$ADMIN_JAR" "$(url backoffice "")" admin admin; then
+        fail "admin login to the back office (tax and stock)"
+        return 1
+    fi
+    vn_id=$(curl -s "$(url storefront /api/location/storefront/countries)" | json "next(c['id'] for c in d if c['code2']=='VN')")
+    S3C_PRODUCT_ID=$(curl -s "$(url storefront /api/product/storefront/product/usb-c-cable)" | json "d['id']")
+    if [ -z "$vn_id" ] || [ -z "$S3C_PRODUCT_ID" ]; then
+        fail "look up Viet Nam and the USB-C Cable"
+        return 1
+    fi
+    if ! s3c_lock; then
+        fail "another smoke run has held the slice 3c lock ($S3C_LOCK) for 3 minutes"
+        return 1
+    fi
+    s3c_preclean
+    S3C_ACTIVE=yes
+
+    # admin: tax class + 10 % rate for Viet Nam
+    S3C_CLASS_ID=$(body_of "$(bo POST /api/tax/backoffice/tax-classes "{\"name\":\"$S3C_TAX_CLASS\"}")" | json "d['id']")
+    [ -n "$S3C_CLASS_ID" ] && S3C_RATE_ID=$(body_of "$(bo POST /api/tax/backoffice/tax-rates \
+        "{\"rate\":10,\"taxClassId\":$S3C_CLASS_ID,\"countryId\":$vn_id}")" | json "d['id']")
+    if [ -z "$S3C_RATE_ID" ]; then
+        fail "admin creates a tax class and a 10 % Viet Nam rate"
+        return 1
+    fi
+    pass "admin creates a tax class and a 10 % Viet Nam rate"
+
+    # admin: product taxed and stock-tracked (all other fields sent back unchanged, 3a-19)
+    S3C_ORIG_DETAIL=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")")
+    S3C_RELATED=$(body_of "$(bo GET "/api/product/backoffice/products/related-products/$S3C_PRODUCT_ID")")
+    if [ "$(json "d['id']" <<< "$S3C_ORIG_DETAIL")" != "$S3C_PRODUCT_ID" ] || [ -z "$(json "len(d)+1" <<< "$S3C_RELATED")" ]; then
+        S3C_ORIG_DETAIL=""
+        fail "read the USB-C Cable admin detail"
+        return 1
+    fi
+    # an interrupted run left the product taxed with a smoke class: its original is the seed (no class, untracked,
+    # 100 units in sample-data.sql)
+    r=$(json "d['taxClassId']" <<< "$S3C_ORIG_DETAIL")
+    if [ -n "$r" ] && [[ " $S3C_LEFTOVER_CLASSES " == *" $r "* ]]; then
+        echo "      note: the USB-C Cable still had a leftover smoke tax class; restoring the seed values (no class, untracked, 100)"
+        S3C_ORIG_DETAIL=$(json "json.dumps({**d, 'taxClassId': None, 'stockTrackingEnabled': False, 'stockQuantity': 100})" <<< "$S3C_ORIG_DETAIL")
+    fi
+    r=$(bo PUT "/api/product/backoffice/products/$S3C_PRODUCT_ID" "$(s3c_product_body "$S3C_CLASS_ID" True)")
+    if [ "$(status_of "$r")" != "204" ]; then
+        fail "admin assigns the tax class and enables stock tracking -> $(status_of "$r")"
+        return 1
+    fi
+    # start from 0 sellable units so the numbers below are exact
+    r=$(bo PUT /api/product/backoffice/products/update-quantity "[{\"productId\":$S3C_PRODUCT_ID,\"stockQuantity\":0}]")
+    if [ "$(status_of "$r")" = "204" ]; then
+        pass "admin assigns the tax class, enables stock tracking and sets the stock to 0"
+    else
+        fail "admin sets the stock to 0 -> $(status_of "$r")"
+        return 1
+    fi
+
+    # admin: warehouse in Viet Nam, add the product, receive 3 units
+    S3C_WH_ID=$(body_of "$(bo POST /api/inventory/backoffice/warehouses \
+        "{\"name\":\"$S3C_WAREHOUSE\",\"contactName\":\"Smoke Keeper\",\"phone\":\"0123456789\",\"addressLine1\":\"1 Depot St\",\"city\":\"Ho Chi Minh City\",\"countryId\":$vn_id}")" \
+        | json "d['id']")
+    if [ -z "$S3C_WH_ID" ]; then
+        fail "admin creates a warehouse in Viet Nam"
+        return 1
+    fi
+    r=$(bo POST /api/inventory/backoffice/stocks "[{\"productId\":$S3C_PRODUCT_ID,\"warehouseId\":$S3C_WH_ID}]")
+    S3C_STOCK_ID=$(body_of "$(bo GET "/api/inventory/backoffice/stocks?warehouseId=$S3C_WH_ID")" \
+        | json "next(s['id'] for s in d if s['productId']==$S3C_PRODUCT_ID)")
+    if [ "$(status_of "$r")" != "204" ] || [ -z "$S3C_STOCK_ID" ]; then
+        fail "admin creates a warehouse and adds the USB-C Cable"
+        return 1
+    fi
+    pass "admin creates a warehouse in Viet Nam and adds the USB-C Cable"
+    r=$(bo PUT /api/inventory/backoffice/stocks \
+        "{\"stockQuantityList\":[{\"stockId\":$S3C_STOCK_ID,\"quantity\":3,\"note\":\"smoke: received\"}]}")
+    [ "$(status_of "$r")" = "200" ] && S3C_WH_UNITS=3
+    sellable=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")" | json "d['stockQuantity']")
+    if [ "$S3C_WH_UNITS" = "3" ] && [ "$sellable" = "3" ]; then
+        pass "a +3 adjustment adds 3 sellable units (0 -> 3)"
+    else
+        fail "a +3 adjustment -> status $(status_of "$r"), sellable stock '$sellable', expected 3"
+        return 1
+    fi
+
+    # customer: saved address in Viet Nam, cart, checkout, preview, order
+    base=$(url storefront "")
+    if ! storefront_login "$S3C_JAR" "$base" customer customer; then
+        fail "customer login (tax and stock)"
+        return 1
+    fi
+    for r in $(body_of "$(sf GET /api/customer/storefront/user-address)" \
+        | json "' '.join(str(a['id']) for a in d if a.get('contactName')=='$S3C_ADDRESS_NAME')"); do
+        sf DELETE "/api/customer/storefront/user-address/$r" >/dev/null
+    done
+    S3C_ADDRESS_ID=$(body_of "$(sf POST /api/customer/storefront/user-address \
+        "{\"contactName\":\"$S3C_ADDRESS_NAME\",\"phone\":\"0123456789\",\"addressLine1\":\"2 Smoke St\",\"city\":\"Ho Chi Minh City\",\"countryId\":$vn_id}")" \
+        | json "d['addressGetVm']['id']")
+    if [ -z "$S3C_ADDRESS_ID" ]; then
+        fail "customer saves an address in Viet Nam"
+        return 1
+    fi
+    pass "customer saves an address in Viet Nam"
+    sf DELETE "/api/cart/storefront/cart/items/$S3C_PRODUCT_ID" >/dev/null
+    r=$(sf POST /api/cart/storefront/cart/items "{\"productId\":$S3C_PRODUCT_ID,\"quantity\":5}")
+    if [ "$(status_of "$r")" = "400" ]; then pass "adding 5 to the cart with 3 in stock is a 400"; else fail "cart add above stock -> $(status_of "$r")"; fi
+    r=$(sf POST /api/cart/storefront/cart/items "{\"productId\":$S3C_PRODUCT_ID,\"quantity\":2}")
+    case "$(status_of "$r")" in
+        200|201|204) pass "customer adds 2 USB-C Cables to the cart" ;;
+        *) fail "cart add 2 -> $(status_of "$r")" ;;
+    esac
+    checkout_id=$(body_of "$(sf POST /api/order/storefront/checkouts \
+        "{\"checkoutItemPostVms\":[{\"productId\":$S3C_PRODUCT_ID,\"quantity\":2}]}")" | json "d['id']")
+    preview=$(body_of "$(sf POST /api/order/storefront/orders/preview \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressId\":$S3C_ADDRESS_ID}")")
+    # money is compared as decimals: total = subtotal x 1.10 (rounded to cents)
+    if python -c "import json,sys
+from decimal import Decimal as D, ROUND_HALF_UP
+p=json.loads(sys.argv[1]); s=D(str(p['subtotal'])); t=D(str(p['total']))
+want=(s*D('1.10')).quantize(D('0.01'), ROUND_HALF_UP)
+sys.exit(0 if s==D('38') and t.quantize(D('0.01'))==want else 1)" "$preview" 2>/dev/null; then
+        pass "preview with the saved address adds 10 % tax (38.00 -> $(json "d['total']" <<< "$preview"))"
+    else
+        fail "preview with the saved address: ${preview:0:200}"
+        return 1
+    fi
+    order=$(body_of "$(sf POST /api/order/storefront/orders \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressId\":$S3C_ADDRESS_ID,\"paymentMethod\":\"COD\"}")")
+    if python -c "import json,sys
+from decimal import Decimal as D
+o=json.loads(sys.argv[1]); p=json.loads(sys.argv[2])
+sys.exit(0 if o.get('orderStatus')=='PENDING_PAYMENT' and D(str(o['tax']))>0
+         and D(str(o['totalPrice']))==D(str(p['total'])) else 1)" "$order" "$preview" 2>/dev/null; then
+        pass "order #$(json "d['id']" <<< "$order") total includes the tax ($(json "d['totalPrice']" <<< "$order"))"
+    else
+        fail "order with tax: ${order:0:200}"
+    fi
+    sellable=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")" | json "d['stockQuantity']")
+    if [ "$sellable" = "1" ]; then pass "the order took 2 units (sellable stock 3 -> 1)"; else fail "sellable stock after the order is '$sellable', expected 1"; fi
+    checkout_id=$(body_of "$(sf POST /api/order/storefront/checkouts \
+        "{\"checkoutItemPostVms\":[{\"productId\":$S3C_PRODUCT_ID,\"quantity\":2}]}")" | json "d['id']")
+    r=$(sf POST /api/order/storefront/orders \
+        "{\"checkoutId\":\"$checkout_id\",\"shippingAddressId\":$S3C_ADDRESS_ID,\"paymentMethod\":\"COD\"}")
+    if [ "$(status_of "$r")" = "400" ] && grep -q "Not enough stock" <<< "$r"; then
+        pass "ordering 2 with 1 left is a 400 not enough stock"
+    else
+        fail "ordering more than in stock -> $(status_of "$r") $(body_of "$r" | head -c 200)"
+    fi
+    sellable=$(body_of "$(bo GET "/api/product/backoffice/products/$S3C_PRODUCT_ID")" | json "d['stockQuantity']")
+    [ "$sellable" = "1" ] || fail "the refused order changed the stock (sellable '$sellable', expected 1)"
+}
+
+# Puts everything back; safe to run twice. Fails loudly when the product could not be restored.
+s3c_cleanup() {
+    local r
+    [ -n "$S3C_ACTIVE" ] || return 0
+    S3C_ACTIVE=""
+    if [ -n "$S3C_ADDRESS_ID" ]; then
+        sf DELETE "/api/cart/storefront/cart/items/$S3C_PRODUCT_ID" >/dev/null
+        r=$(sf DELETE "/api/customer/storefront/user-address/$S3C_ADDRESS_ID")
+        if [ "$(status_of "$r")" = "200" ]; then pass "cleanup: delete the saved address"; else fail "cleanup: delete the saved address -> $(status_of "$r")"; fi
+        S3C_ADDRESS_ID=""
+    fi
+    curl -s -o /dev/null -L -b "$S3C_JAR" -c "$S3C_JAR" -X POST "$(url storefront /logout)" || true
+    if [ -n "$S3C_WH_ID" ]; then
+        # book the received units out again, then the empty warehouse can be deleted
+        if [ "$S3C_WH_UNITS" != "0" ]; then
+            bo PUT /api/inventory/backoffice/stocks \
+                "{\"stockQuantityList\":[{\"stockId\":$S3C_STOCK_ID,\"quantity\":-$S3C_WH_UNITS,\"note\":\"smoke: book out\"}]}" >/dev/null
+            S3C_WH_UNITS=0
+        fi
+        r=$(bo DELETE "/api/inventory/backoffice/warehouses/$S3C_WH_ID")
+        if [ "$(status_of "$r")" = "204" ]; then pass "cleanup: delete the warehouse"; else fail "cleanup: delete the warehouse -> $(status_of "$r")"; fi
+        S3C_WH_ID=""
+    fi
+    if [ -n "$S3C_ORIG_DETAIL" ]; then
+        local orig_stock orig_tax orig_tracking ok=yes
+        orig_stock=$(json "d['stockQuantity']" <<< "$S3C_ORIG_DETAIL")
+        orig_tax=$(json "d['taxClassId']" <<< "$S3C_ORIG_DETAIL")
+        orig_tracking=$(json "d['stockTrackingEnabled']" <<< "$S3C_ORIG_DETAIL")
+        if [ -n "$orig_stock" ]; then
+            r=$(bo PUT /api/product/backoffice/products/update-quantity "[{\"productId\":$S3C_PRODUCT_ID,\"stockQuantity\":$orig_stock}]")
+            [ "$(status_of "$r")" = "204" ] || ok=no
+        fi
+        r=$(bo PUT "/api/product/backoffice/products/$S3C_PRODUCT_ID" "$(s3c_product_body "$orig_tax" "$orig_tracking")")
+        [ "$(status_of "$r")" = "204" ] || ok=no
+        if [ "$ok" = "yes" ]; then
+            pass "cleanup: USB-C Cable back to tax class ${orig_tax:-none}, stock tracking $orig_tracking, stock ${orig_stock:-none}"
+        else
+            fail "cleanup: USB-C Cable NOT restored (taxClassId $orig_tax, stockTrackingEnabled $orig_tracking, stockQuantity $orig_stock): fix it in the back office"
+        fi
+        S3C_ORIG_DETAIL=""
+    fi
+    if [ -n "$S3C_RATE_ID" ]; then bo DELETE "/api/tax/backoffice/tax-rates/$S3C_RATE_ID" >/dev/null; S3C_RATE_ID=""; fi
+    if [ -n "$S3C_CLASS_ID" ]; then
+        r=$(bo DELETE "/api/tax/backoffice/tax-classes/$S3C_CLASS_ID")
+        if [ "$(status_of "$r")" = "204" ]; then pass "cleanup: delete the tax rate and class"; else fail "cleanup: delete the tax class -> $(status_of "$r")"; fi
+        S3C_CLASS_ID=""
+    fi
+}
+
+check_slice3c() {
+    local customer_token
+    check_http "countries are public" "$(url api /location/storefront/countries)" 200
+    customer_token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=customer -d password=customer \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" | json "d['access_token']")
+    check_http "a customer cannot create a tax class" "$(url api /tax/backoffice/tax-classes)" 403 \
+        -H "Authorization: Bearer $customer_token" -H 'Content-Type: application/json' -d '{"name":"Customer VAT"}'
+    check_http "a customer cannot create a warehouse" "$(url api /inventory/backoffice/warehouses)" 403 \
+        -H "Authorization: Bearer $customer_token" -H 'Content-Type: application/json' -d '{"name":"Customer WH"}'
+    check_http "a customer cannot create a country" "$(url api /location/backoffice/countries)" 403 \
+        -H "Authorization: Bearer $customer_token" -H 'Content-Type: application/json' -d '{"name":"Customerland"}'
+    s3c_flow || true
+    s3c_cleanup
+    s3c_unlock
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -506,6 +831,7 @@ run_checks() {
     check_login_and_cart
     check_backoffice
     check_media
+    check_slice3c
     check_cdc
 }
 
