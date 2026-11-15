@@ -1,0 +1,17 @@
+# storefront-bff: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-storefront-bff:<tag>.
+name: storefront-bff
+kind: spring
+port: 8087
+env:
+  # through the ingress: the edge blocks apply to the BFF's calls too
+  API_BASE_URL: '{{ include "shopapp-service.publicUrl" (list . "api") }}'
+  STOREFRONT_URL: http://storefront:3000
+  # browser-facing Keycloak URL (issuer) + in-cluster back channel (decisions.md 2b-6)
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  KEYCLOAK_INTERNAL_URL: http://identity:8080
+  REDIS_HOST: redis
+secretEnv:
+  STOREFRONT_BFF_CLIENT_SECRET:
+    secret: shopapp-keycloak-clients
+    key: STOREFRONT_BFF_CLIENT_SECRET

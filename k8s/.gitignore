@@ -1,0 +1,3 @@
+# vendored by `helm dependency build` (k8s/scripts/validate-charts.sh, scripts/k8s-up.sh)
+charts/*/charts/
+charts/*/Chart.lock

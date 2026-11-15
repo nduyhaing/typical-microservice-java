@@ -1,0 +1,12 @@
+# rating: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-rating:<tag>.
+name: rating
+kind: spring
+contextPath: /rating
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # "did the customer buy it?" and the product name (decisions.md 4-31, 4-35)
+  SHOPAPP_SERVICES_ORDER: http://order:8080/order
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product

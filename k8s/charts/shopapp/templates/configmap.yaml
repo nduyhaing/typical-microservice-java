@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # every workload loads it (shopapp-service sharedConfigMap, envFrom)
+  name: shopapp-config
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+data:
+  {{- range $k := keys .Values.sharedConfig | sortAlpha }}
+  {{ $k }}: {{ index $.Values.sharedConfig $k | toString | quote }}
+  {{- end }}

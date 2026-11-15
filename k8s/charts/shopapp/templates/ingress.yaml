@@ -1,0 +1,129 @@
+{{- if .Values.ingress.enabled }}
+{{- $deny := list "edge-deny" 8080 }}
+{{- if .Values.ingress.identity.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopapp-identity
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+  annotations:
+    {{- include "shopapp.ingressAnnotations" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "shopapp.host" (list . "identity") }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list .Values.ingress.identity.service .Values.ingress.identity.port) | nindent 14 }}
+---
+{{- end }}
+# api.<domain>: /<service>/ per service, like compose nginx. Plain Prefix paths only (no regex, no rewrite
+# annotation), so nginx picks the longest prefix: the refused paths below win over /<service>/.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopapp-api
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+  annotations:
+    {{- include "shopapp.ingressAnnotations" . | nindent 4 }}
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.ingress.uploadBodySize | quote }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "shopapp.host" (list . "api") }}
+      http:
+        paths:
+          {{- if include "shopapp.enabled" (list . "product") }}
+          # order-only stock endpoints: order calls product in-cluster, never through the edge (3c-63)
+          {{- range list "subtract" "restore" }}
+          - path: /product/backoffice/products/{{ . }}-quantity
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+          {{- end }}
+          {{- end }}
+          {{- if include "shopapp.enabled" (list . "promotion") }}
+          # coupon usage endpoints: only order calls them, in-cluster (4-75)
+          {{- range list "apply" "release" }}
+          - path: /promotion/storefront/promotions/{{ . }}-usage
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+          {{- end }}
+          {{- end }}
+          {{- range $svc := .Values.ingress.apiServices }}
+          {{- if include "shopapp.enabled" (list $ $svc) }}
+          # actuator stays inside the cluster (probes, metrics scraping)
+          - path: /{{ $svc }}/actuator
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+          - path: /{{ $svc }}
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list $svc 8080) | nindent 14 }}
+          {{- end }}
+          {{- end }}
+          # anything else: 404 {"detail":"no services yet"}, like compose
+          - path: /
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+{{- range $bff := list (dict "host" "storefront" "service" "storefront-bff" "port" 8087 "upload" false) (dict "host" "backoffice" "service" "backoffice-bff" "port" 8088 "upload" true) }}
+{{- if include "shopapp.enabled" (list $ $bff.service) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopapp-{{ $bff.host }}
+  labels:
+    {{- include "shopapp.labels" $ | nindent 4 }}
+  annotations:
+    {{- include "shopapp.ingressAnnotations" $ | nindent 4 }}
+    {{- if $bff.upload }}
+    # back-office image uploads go through this host (3b-15)
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ $.Values.ingress.uploadBodySize | quote }}
+    {{- end }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ include "shopapp.host" (list $ $bff.host) }}
+      http:
+        paths:
+          - path: /actuator
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" $deny | nindent 14 }}
+          - path: /
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list $bff.service $bff.port) | nindent 14 }}
+{{- end }}
+{{- end }}
+{{- if .Values.ingress.kafkaUi.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopapp-kafka-ui
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+  annotations:
+    {{- include "shopapp.ingressAnnotations" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    - host: {{ include "shopapp.host" (list . "kafka") }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              {{- include "shopapp.backend" (list .Values.ingress.kafkaUi.service .Values.ingress.kafkaUi.port) | nindent 14 }}
+{{- end }}
+{{- end }}

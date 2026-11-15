@@ -1,0 +1,17 @@
+# media: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-media:<tag>.
+name: media
+kind: spring
+contextPath: /media
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # browser-facing base of the image URLs (MediaVm.url)
+  SHOPAPP_PUBLIC_URL_MEDIA: '{{ include "shopapp-service.publicUrl" (list . "api") }}/media'
+  FILE_DIRECTORY: /images/
+# uploaded images (compose volume media-data)
+persistence:
+  enabled: true
+  mountPath: /images
+  size: 1Gi

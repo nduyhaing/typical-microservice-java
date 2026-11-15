@@ -1,0 +1,10 @@
+shop_app {{ .Chart.Version }} installed in namespace {{ .Release.Namespace }}.
+
+Open (add the hosts to your hosts file, pointing at the ingress):
+  storefront  {{ include "shopapp-service.publicUrl" (list . "storefront") }}
+  back office {{ include "shopapp-service.publicUrl" (list . "backoffice") }}  (admin / admin)
+  api         {{ include "shopapp-service.publicUrl" (list . "api") }}/product/storefront/product/galaxy-a55
+  identity    {{ include "shopapp-service.publicUrl" (list . "identity") }}
+
+Pods resolve these hostnames through the CoreDNS rewrite that scripts/k8s-up.sh adds (k8s/README.md "DNS").
+Watch the rollout: kubectl -n {{ .Release.Namespace }} get pods -w

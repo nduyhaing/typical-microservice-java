@@ -1,0 +1,116 @@
+{{- define "shopapp.edgeDenyConf" -}}
+{{- $forbidden := `{"statusCode":"403 FORBIDDEN","title":"Forbidden","detail":"Not available through the API gateway","fieldErrors":[]}` -}}
+server {
+    listen 8080 default_server;
+    server_tokens off;
+    default_type application/json;
+
+    location ~* ^/product/+backoffice/+products/+(subtract|restore)-quantity {
+        return 403 '{{ $forbidden }}';
+    }
+    location ~* ^/promotion/+storefront/+promotions/+(apply|release)-usage {
+        return 403 '{{ $forbidden }}';
+    }
+    location ~* ^/([^/]+/+)?actuator(/|$) {
+        return 404 '{"detail":"not found"}';
+    }
+    location / {
+        return 404 '{"detail":"no services yet"}';
+    }
+}
+{{- end -}}
+
+{{- if .Values.ingress.enabled }}
+# Answers the paths the Ingresses route here with compose nginx's responses. The regexes repeat compose's
+# (multiple slashes, any case) as a second line of defence; the Ingress already sends only these paths.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: edge-deny
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    {{- include "shopapp.edgeDenyConf" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-deny
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+    app.kubernetes.io/name: edge-deny
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: edge-deny
+      app.kubernetes.io/part-of: shopapp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: edge-deny
+        app.kubernetes.io/part-of: shopapp
+      annotations:
+        checksum/config: {{ include "shopapp.edgeDenyConf" . | sha256sum | trunc 16 }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: {{ .Values.edgeDeny.image | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.edgeDeny.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            # pid file and proxy temp dirs of the unprivileged image
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: edge-deny
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-deny
+  labels:
+    {{- include "shopapp.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: edge-deny
+    app.kubernetes.io/part-of: shopapp
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+{{- end }}

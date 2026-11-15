@@ -1,0 +1,18 @@
+# search: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-search:<tag>.
+name: search
+kind: spring
+contextPath: /search
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+secretEnv:
+  # file-realm user limited to the product index (decisions.md 4-17)
+  ELASTICSEARCH_USERNAME:
+    secret: shopapp-elasticsearch
+    key: SEARCH_ES_USERNAME
+  ELASTICSEARCH_PASSWORD:
+    secret: shopapp-elasticsearch
+    key: SEARCH_ES_PASSWORD

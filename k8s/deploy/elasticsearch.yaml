@@ -1,0 +1,132 @@
+# Elasticsearch single node, the counterpart of the compose "elasticsearch" service: security on, plain HTTP inside
+# the namespace, the search service's file-realm user created from a Secret by the same entrypoint script
+# (docker/elasticsearch, ConfigMap elasticsearch-shopapp created by scripts/k8s-up.sh). Plain StatefulSet, not ECK:
+# ECK's operator and its generated TLS/users would replace the file-realm setup the search service is built
+# around (decisions.md 6-28).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: shopapp
+  labels:
+    app.kubernetes.io/name: elasticsearch
+    app.kubernetes.io/part-of: shopapp
+spec:
+  serviceName: elasticsearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: elasticsearch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: elasticsearch
+        app.kubernetes.io/part-of: shopapp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: elasticsearch
+          image: docker.elastic.co/elasticsearch/elasticsearch:9.4.8
+          command: ["/bin/tini", "--", "/bin/bash", "/shopapp/entrypoint.sh"]
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: cluster.name
+              value: shopapp
+            - name: ES_JAVA_OPTS
+              value: -Xms512m -Xmx512m
+            # no privileged init container for vm.max_map_count: niofs instead of mmap (fine for one small index)
+            - name: node.store.allow_mmap
+              value: "false"
+            - name: xpack.security.enabled
+              value: "true"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: xpack.security.transport.ssl.enabled
+              value: "false"
+            - name: cluster.routing.allocation.disk.threshold_enabled
+              value: "false"
+            - name: ELASTIC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-elasticsearch
+                  key: ELASTIC_PASSWORD
+            - name: SEARCH_ES_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-elasticsearch
+                  key: SEARCH_ES_USERNAME
+            - name: SEARCH_ES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-elasticsearch
+                  key: SEARCH_ES_PASSWORD
+          ports:
+            - name: http
+              containerPort: 9200
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - >-
+                  curl -fsS -u "elastic:${ELASTIC_PASSWORD}"
+                  'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s'
+                  | grep -qE '"status":"(green|yellow)"'
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 768Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+            - name: shopapp
+              mountPath: /shopapp
+              readOnly: true
+      volumes:
+        - name: shopapp
+          configMap:
+            name: elasticsearch-shopapp
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: shopapp
+spec:
+  selector:
+    app.kubernetes.io/name: elasticsearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: http

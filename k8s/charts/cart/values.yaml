@@ -1,0 +1,11 @@
+# cart: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-cart:<tag>.
+name: cart
+kind: spring
+contextPath: /cart
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # through the ingress, like compose goes through the nginx alias
+  SHOPAPP_SERVICES_PRODUCT: '{{ include "shopapp-service.publicUrl" (list . "api") }}/product'

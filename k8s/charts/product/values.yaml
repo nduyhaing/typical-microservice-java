@@ -1,0 +1,14 @@
+# product: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-product:<tag>.
+name: product
+kind: spring
+contextPath: /product
+database:
+  enabled: true
+env:
+  # token issuer = the public Keycloak URL (pods reach it through the ingress, see k8s/README.md "DNS")
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # schema only; the umbrella chart turns the dev catalog on ("sample-data", like .env)
+  SPRING_LIQUIBASE_CONTEXTS: default
+  # in-cluster; any media failure falls back to placeholder images (decisions.md 2a-11)
+  SHOPAPP_SERVICES_MEDIA: http://media:8080/media

@@ -1,0 +1,102 @@
+# shop_app umbrella chart: all non-secret settings. Secrets are never values: the charts reference Kubernetes
+# Secrets that k8s/scripts/make-secrets.sh creates from .env (shopapp-postgres, shopapp-keycloak-clients,
+# shopapp-sampledata-db, shopapp-elasticsearch). Each service's own in-cluster wiring (URLs of the services it calls)
+# lives in its thin chart (k8s/charts/<service>/values.yaml) so a thin chart also installs alone; override any of it
+# here under the service's key.
+
+global:
+  # public hostnames: identity.<domain>, api.<domain>, storefront.<domain>, backoffice.<domain> (same as compose)
+  domain: shopapp.local
+  # port browsers use to reach the ingress; part of every public URL (token issuer, image URLs) when not 80.
+  # scripts/k8s-up.sh sets it to K8S_HTTP_PORT (default 8000: compose's nginx already has 80)
+  httpPort: 80
+  scheme: http
+  # images: <imageRegistry>/<imageNamePrefix><service>:<imageTag>, published by CI (.github/workflows);
+  # scripts/k8s-up.sh K8S_IMAGES=local uses the compose images shopapp/<service>:dev instead
+  imageRegistry: ghcr.io/nduyhaing
+  imageNamePrefix: shopapp-
+  imageTag: latest
+  # GHCR packages are private by default: name a docker-registry Secret here (scripts/k8s-up.sh creates "ghcr-pull"
+  # from GHCR_USER/GHCR_TOKEN and sets this), or the owner makes the packages public
+  imagePullSecrets: []
+
+# ConfigMap shopapp-config, loaded by every workload (envFrom). Settings every service reads the same way; a
+# service's own env wins over these.
+# (Telemetry settings such as OTEL_EXPORTER_OTLP_ENDPOINT belong here once a collector runs in the cluster.)
+sharedConfig:
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+ingress:
+  enabled: true
+  # ingress-nginx (scripts/k8s-up.sh installs it); see k8s/README.md for the edge blocks without snippets
+  className: nginx
+  # Keycloak sends large cookies and headers (same as compose nginx's proxy_buffer_size)
+  proxyBufferSize: 128k
+  # media uploads: a 10 MB file plus multipart overhead (3b-23), api and backoffice hosts
+  uploadBodySize: 11m
+  # services routed on api.<domain> as /<service>/ (only the enabled ones are rendered)
+  apiServices: [product, cart, customer, order, media, tax, location, inventory, promotion, rating, search,
+                recommendation, sampledata, webhook]
+  # Keycloak (k8s/deploy/keycloak.yaml) behind identity.<domain>
+  identity:
+    enabled: true
+    service: identity
+    port: 8080
+  # Kafka UI (k8s/deploy/kafka-ui.yaml, optional) behind kafka.<domain>
+  kafkaUi:
+    enabled: false
+    service: kafka-ui
+    port: 8080
+
+# Replaces compose nginx's refused locations (stock subtract/restore 3c-63, coupon apply/release-usage 4-75,
+# actuator) and its "no services yet" fallback: the Ingress routes those paths to this tiny nginx, which answers
+# with the same status and JSON body. No snippet annotations needed (disabled by default in ingress-nginx).
+edgeDeny:
+  image: nginxinc/nginx-unprivileged:1.30.6-alpine
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      cpu: 100m
+      memory: 32Mi
+
+product:
+  enabled: true
+  env:
+    # loads the dev catalog, like PRODUCT_LIQUIBASE_CONTEXTS in .env; "default" = schema only
+    SPRING_LIQUIBASE_CONTEXTS: sample-data
+cart:
+  enabled: true
+customer:
+  enabled: true
+order:
+  enabled: true
+media:
+  enabled: true
+tax:
+  enabled: true
+location:
+  enabled: true
+inventory:
+  enabled: true
+promotion:
+  enabled: true
+rating:
+  enabled: true
+search:
+  enabled: true
+recommendation:
+  enabled: true
+sampledata:
+  enabled: true
+webhook:
+  enabled: true
+storefront-bff:
+  enabled: true
+backoffice-bff:
+  enabled: true
+storefront:
+  enabled: true
+backoffice:
+  enabled: true

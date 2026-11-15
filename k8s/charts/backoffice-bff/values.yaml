@@ -1,0 +1,16 @@
+# backoffice-bff: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-backoffice-bff:<tag>.
+name: backoffice-bff
+kind: spring
+port: 8088
+env:
+  # through the ingress: the edge blocks apply to the BFF's calls too
+  API_BASE_URL: '{{ include "shopapp-service.publicUrl" (list . "api") }}'
+  BACKOFFICE_URL: http://backoffice:3000
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  KEYCLOAK_INTERNAL_URL: http://identity:8080
+  REDIS_HOST: redis
+secretEnv:
+  BACKOFFICE_BFF_CLIENT_SECRET:
+    secret: shopapp-keycloak-clients
+    key: BACKOFFICE_BFF_CLIENT_SECRET

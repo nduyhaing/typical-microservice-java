@@ -1,0 +1,11 @@
+# Everything of shop_app (infrastructure from k8s/deploy and the shopapp Helm release) lives in one namespace, so
+# the Services keep their compose names (postgres, identity, kafka, redis, elasticsearch, product, ...) and the
+# in-cluster URLs stay the same as in docker-compose.yml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shopapp
+  labels:
+    # every pod runs non-root, without privilege escalation, with all capabilities dropped and the runtime's
+    # seccomp profile (the infrastructure images keep a writable root filesystem; the shop's own pods do not)
+    pod-security.kubernetes.io/enforce: restricted

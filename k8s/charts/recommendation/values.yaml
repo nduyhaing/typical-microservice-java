@@ -1,0 +1,23 @@
+# recommendation: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-recommendation:<tag>.
+name: recommendation
+kind: spring
+contextPath: /recommendation
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+# the first start downloads the ~90 MB model: 6 minutes before the liveness probe takes over
+probes:
+  startupFailureThreshold: 72
+# ONNX Runtime inference memory is native, outside -Xmx (decisions.md 5-44)
+resources:
+  limits:
+    memory: 1Gi
+# model cache (compose volume recommendation-model); RECOMMENDATION_MODEL_CACHE is set in the image
+persistence:
+  enabled: true
+  mountPath: /var/cache/shopapp/onnx-model
+  size: 512Mi

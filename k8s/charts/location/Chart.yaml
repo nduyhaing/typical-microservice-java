@@ -1,0 +1,11 @@
+apiVersion: v2
+name: location
+description: shop_app location service; thin chart over the shopapp-service library chart.
+type: application
+version: 0.1.0
+# image tag when neither the chart values nor global.imageTag set one
+appVersion: "latest"
+dependencies:
+  - name: shopapp-service
+    version: 0.1.0
+    repository: file://../shopapp-service

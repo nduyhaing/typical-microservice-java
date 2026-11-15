@@ -1,0 +1,12 @@
+# inventory: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-inventory:<tag>.
+name: inventory
+kind: spring
+contextPath: /inventory
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # with the admin's token (decisions.md 3c-28)
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+  SHOPAPP_SERVICES_LOCATION: http://location:8080/location

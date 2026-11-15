@@ -1,0 +1,17 @@
+# customer: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-customer:<tag>.
+name: customer
+kind: spring
+contextPath: /customer
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # Keycloak admin API straight to the Keycloak Service
+  KEYCLOAK_ADMIN_URL: http://identity:8080
+  # saved addresses, with the customer's token (decisions.md 3c-33)
+  SHOPAPP_SERVICES_LOCATION: http://location:8080/location
+secretEnv:
+  CUSTOMER_MANAGEMENT_CLIENT_SECRET:
+    secret: shopapp-keycloak-clients
+    key: CUSTOMER_MANAGEMENT_CLIENT_SECRET

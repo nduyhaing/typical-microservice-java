@@ -1,0 +1,130 @@
+# Keycloak as a plain Deployment, the counterpart of the compose "identity" service (start-dev, realm import,
+# Postgres database "keycloak"). Not the Keycloak operator: one dev instance does not need its CRDs and controller
+# (decisions.md 6-26). ConfigMaps created by scripts/k8s-up.sh:
+#   keycloak-realm  identity/realm-export.json (imported on the first start only, like compose)
+#   keycloak-env    KC_HOSTNAME (public URL incl. port = token issuer base) and DOMAIN (realm redirect URIs)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identity
+  namespace: shopapp
+  labels:
+    app.kubernetes.io/name: identity
+    app.kubernetes.io/part-of: shopapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: identity
+        app.kubernetes.io/part-of: shopapp
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.8.2
+          args: ["start-dev", "--import-realm"]
+          envFrom:
+            - configMapRef:
+                name: keycloak-env
+          env:
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://postgres:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: username
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: password
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            # behind ingress-nginx, which sets X-Forwarded-* and drops client-supplied ones
+            - name: KC_PROXY_HEADERS
+              value: xforwarded
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            - name: JAVA_OPTS_KC_HEAP
+              value: -Xms256m -Xmx768m
+            # Postgres max_connections is shared by every service
+            - name: KC_DB_POOL_MAX_SIZE
+              value: "20"
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-keycloak-admin
+                  key: username
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-keycloak-admin
+                  key: password
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: management
+              containerPort: 9000
+          startupProbe:
+            httpGet:
+              path: /health/started
+              port: management
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: management
+            periodSeconds: 10
+            timeoutSeconds: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              memory: 1280Mi
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+      volumes:
+        - name: realm
+          configMap:
+            name: keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity
+  namespace: shopapp
+spec:
+  selector:
+    app.kubernetes.io/name: identity
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

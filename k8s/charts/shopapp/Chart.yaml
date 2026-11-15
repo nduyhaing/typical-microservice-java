@@ -1,0 +1,87 @@
+apiVersion: v2
+name: shopapp
+description: >-
+  shop_app umbrella chart: every service, the two BFFs and the Next.js apps (thin charts over shopapp-service), the
+  shared ConfigMap, the ingress-nginx Ingresses with the same hostnames as compose, and the edge-deny backend that
+  replaces nginx's blocked locations. Infrastructure (Postgres, Kafka, Keycloak, Redis, Elasticsearch) is in
+  k8s/deploy (decisions.md 6-20..6-39).
+type: application
+version: 0.1.0
+appVersion: "latest"
+dependencies:
+  # NOTES.txt uses its publicUrl helper
+  - name: shopapp-service
+    version: 0.1.0
+    repository: file://../shopapp-service
+  - name: product
+    version: 0.1.0
+    repository: file://../product
+    condition: product.enabled
+  - name: cart
+    version: 0.1.0
+    repository: file://../cart
+    condition: cart.enabled
+  - name: customer
+    version: 0.1.0
+    repository: file://../customer
+    condition: customer.enabled
+  - name: order
+    version: 0.1.0
+    repository: file://../order
+    condition: order.enabled
+  - name: media
+    version: 0.1.0
+    repository: file://../media
+    condition: media.enabled
+  - name: tax
+    version: 0.1.0
+    repository: file://../tax
+    condition: tax.enabled
+  - name: location
+    version: 0.1.0
+    repository: file://../location
+    condition: location.enabled
+  - name: inventory
+    version: 0.1.0
+    repository: file://../inventory
+    condition: inventory.enabled
+  - name: promotion
+    version: 0.1.0
+    repository: file://../promotion
+    condition: promotion.enabled
+  - name: rating
+    version: 0.1.0
+    repository: file://../rating
+    condition: rating.enabled
+  - name: search
+    version: 0.1.0
+    repository: file://../search
+    condition: search.enabled
+  - name: recommendation
+    version: 0.1.0
+    repository: file://../recommendation
+    condition: recommendation.enabled
+  - name: sampledata
+    version: 0.1.0
+    repository: file://../sampledata
+    condition: sampledata.enabled
+  - name: webhook
+    version: 0.1.0
+    repository: file://../webhook
+    condition: webhook.enabled
+  - name: storefront-bff
+    version: 0.1.0
+    repository: file://../storefront-bff
+    condition: storefront-bff.enabled
+  - name: backoffice-bff
+    version: 0.1.0
+    repository: file://../backoffice-bff
+    condition: backoffice-bff.enabled
+  - name: storefront
+    version: 0.1.0
+    repository: file://../storefront
+    condition: storefront.enabled
+  - name: backoffice
+    version: 0.1.0
+    repository: file://../backoffice
+    condition: backoffice.enabled

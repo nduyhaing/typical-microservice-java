@@ -1,0 +1,11 @@
+# promotion: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-promotion:<tag>.
+name: promotion
+kind: spring
+contextPath: /promotion
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # with the caller's token (decisions.md 4-42)
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product

@@ -1,0 +1,147 @@
+# The compose one-shots debezium-db-init and sampledata-db-init: they need product's (and order's) tables, which
+# the services' Liquibase creates once the shopapp chart is installed, so each Job waits for them first. Same SQL files
+# as compose (ConfigMap shopapp-postgres-sql), passwords from Secrets (psql \getenv, never on a command line).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: debezium-db-init
+  namespace: shopapp
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: psql
+          image: postgres:16.16
+          command: ["bash", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -d product -tAc "SELECT to_regclass('public.product') IS NOT NULL" 2>/dev/null)" = t ]; do
+                echo "waiting for product's tables"; sleep 5
+              done
+              psql -q -h postgres -d product -f /sql/debezium-user.sql
+              # order connector (slice 5): grants and publication in the order database, like compose
+              if [ -f /sql/debezium-order.sql ]; then
+                until [ "$(psql -h postgres -d order -tAc "SELECT to_regclass('public.\"order\"') IS NOT NULL" 2>/dev/null)" = t ]; do
+                  echo "waiting for order's tables"; sleep 5
+                done
+                psql -q -h postgres -d order -f /sql/debezium-order.sql
+              fi
+              echo "debezium login, grants and publications ready"
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: password
+            - name: DEBEZIUM_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-debezium
+                  key: username
+            - name: DEBEZIUM_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-debezium
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            name: shopapp-postgres-sql
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sampledata-db-init
+  namespace: shopapp
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: psql
+          image: postgres:16.16
+          command: ["bash", "-ec"]
+          args:
+            - |
+              until [ "$(psql -h postgres -d product -tAc "SELECT to_regclass('public.product') IS NOT NULL" 2>/dev/null)" = t ]; do
+                echo "waiting for product's tables"; sleep 5
+              done
+              # sampledata-user.sql includes sampledata-grants.sql from the same directory (\ir)
+              psql -q -h postgres -d product -f /sql/sampledata-user.sql
+              echo "sampledata login and grants ready"
+          env:
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-postgres
+                  key: password
+            - name: SAMPLEDATA_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shopapp-sampledata-db
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: sql
+          configMap:
+            name: shopapp-postgres-sql

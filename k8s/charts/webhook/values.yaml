@@ -1,0 +1,13 @@
+# webhook: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-webhook:<tag>.
+name: webhook
+kind: spring
+contextPath: /webhook
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # product and order CDC topics (decisions.md 5-32)
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  # hosts exempt from the private-address refusal of deliveries (exact names); none by default
+  WEBHOOK_ALLOWED_HOSTS: ""

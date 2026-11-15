@@ -1,0 +1,23 @@
+# Core shopping path only (slice 1-2 smoke: browse, log in, cart, checkout, my orders), for a memory-constrained
+# local cluster: scripts/k8s-up.sh with K8S_PROFILE=core. Needs only Postgres, Keycloak and Redis from k8s/deploy.
+# Product falls back to placeholder images without media; order needs promotion only for a coupon.
+media:
+  enabled: false
+inventory:
+  enabled: false
+promotion:
+  enabled: false
+rating:
+  enabled: false
+search:
+  enabled: false
+recommendation:
+  enabled: false
+sampledata:
+  enabled: false
+webhook:
+  enabled: false
+backoffice-bff:
+  enabled: false
+backoffice:
+  enabled: false

@@ -1,0 +1,33 @@
+# shop_app additions to ingress-nginx (kind provider manifest, installed by scripts/k8s-up.sh).
+#
+# 1. Client-supplied forwarding headers that could pick a base URL are dropped, like compose nginx's
+#    `proxy_set_header Forwarded ""` / `X-Forwarded-Prefix ""` (decisions.md 2b-12). ingress-nginx already
+#    overwrites X-Forwarded-For/-Host/-Proto/-Port (use-forwarded-headers is off by default); these two it would pass
+#    through. Set through the controller's proxy-set-headers option, not a snippet (k8s-up.sh points the controller
+#    ConfigMap at this one).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shopapp-proxy-headers
+  namespace: ingress-nginx
+data:
+  Forwarded: ""
+  X-Forwarded-Prefix: ""
+---
+# 2. Pods call the public URLs (token issuer http://identity.<domain>:<port>, http://api.<domain>:<port>/cart) like
+#    compose containers go through nginx's network aliases. CoreDNS rewrites *.<domain> to this Service, which
+#    listens on the public port (k8s-up.sh replaces 8000 with K8S_HTTP_PORT) and forwards to the controller.
+apiVersion: v1
+kind: Service
+metadata:
+  name: shopapp-edge
+  namespace: ingress-nginx
+spec:
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/component: controller
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

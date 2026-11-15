@@ -1,0 +1,26 @@
+# order: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-order:<tag>.
+name: order
+kind: spring
+contextPath: /order
+database:
+  enabled: true
+env:
+  KEYCLOAK_URL: '{{ include "shopapp-service.publicUrl" (list . "identity") }}'
+  # stock subtract/restore are refused at the edge, so product is called in-cluster (3c-63)
+  SHOPAPP_SERVICES_PRODUCT: http://product:8080/product
+  # through the ingress, like compose goes through the nginx alias
+  SHOPAPP_SERVICES_CART: '{{ include "shopapp-service.publicUrl" (list . "api") }}/cart'
+  SHOPAPP_SERVICES_TAX: http://tax:8080/tax
+  SHOPAPP_SERVICES_LOCATION: http://location:8080/location
+  # coupon verify / apply-usage / release-usage (4-54); the usage calls are refused at the edge
+  SHOPAPP_SERVICES_PROMOTION: http://promotion:8080/promotion
+  # its own client-credentials token for product's / promotion's internal endpoints, straight to Keycloak (the
+  # token's issuer stays KEYCLOAK_URL) (decisions.md 5-5)
+  SHOPAPP_SERVICE_AUTH_TOKEN_URI: http://identity:8080/realms/shopapp/protocol/openid-connect/token
+secretEnv:
+  # service-to-service client of the order lifecycle (slice 5); optional until .env has it
+  ORDER_SERVICE_CLIENT_SECRET:
+    secret: shopapp-keycloak-clients
+    key: ORDER_SERVICE_CLIENT_SECRET
+    optional: true

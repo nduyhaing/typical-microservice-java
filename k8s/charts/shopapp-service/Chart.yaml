@@ -1,0 +1,8 @@
+apiVersion: v2
+name: shopapp-service
+description: >-
+  Library chart for every shop_app workload (Spring Boot services, the two BFFs, the Next.js apps): Deployment,
+  Service, env from the shared ConfigMap + values + Secret refs, actuator probes, resources sized to the JVM caps,
+  restricted securityContext, optional PVC, HPA and PodDisruptionBudget (decisions.md 6-20..6-39).
+type: library
+version: 0.1.0

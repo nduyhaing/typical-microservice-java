@@ -1,0 +1,7 @@
+# storefront: values for the shopapp-service library chart (defaults and every key:
+# k8s/charts/shopapp-service/templates/_helpers.tpl). Image: <global.imageRegistry>/shopapp-storefront:<tag>.
+name: storefront
+kind: nextjs
+env:
+  # server-side rendering calls the BFF in-cluster
+  API_BASE_PATH_SERVER: http://storefront-bff:8087/api
