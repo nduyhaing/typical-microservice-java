@@ -110,6 +110,9 @@ services:
     environment:
       KAFKA_CLUSTERS_0_NAME: shopapp
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      # Kafka Connect tab (CDC connectors); the UI works without it when kafka-connect is down
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: debezium
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://kafka-connect:8083
       DYNAMIC_CONFIG_ENABLED: "true"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q UP"]
@@ -120,6 +123,77 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # Change data capture (slice 4): Debezium streams public.product changes from Postgres to the Kafka topic
+  # dbproduct.public.product (decisions.md 4-1..4-9). No host port: use Kafka UI (Kafka Connect tab) or
+  # `docker compose exec kafka-connect curl localhost:8083/connectors?expand=status`.
+  kafka-connect:
+    image: quay.io/debezium/connect:3.7.1.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: shopapp-connect
+      CONFIG_STORAGE_TOPIC: connect-configs
+      OFFSET_STORAGE_TOPIC: connect-offsets
+      STATUS_STORAGE_TOPIC: connect-statuses
+      # single broker
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      # connector configs say ${env:DEBEZIUM_DB_PASSWORD}; the worker resolves it, the REST API never shows it
+      CONNECT_CONFIG_PROVIDERS: env
+      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+      CONNECT_CONFIG_PROVIDERS_ENV_PARAM_ALLOWLIST_PATTERN: ^DEBEZIUM_DB_.*$$
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8083/connectors"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # one-shot: replication user, grants and publication in the product DB (idempotent; needs product's tables)
+  debezium-db-init:
+    image: postgres:16.16
+    command: ["psql", "-q", "-h", "postgres", "-U", "${POSTGRES_USER}", "-d", "product", "-f", "/sql/debezium-user.sql"]
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      DEBEZIUM_DB_USER: ${DEBEZIUM_DB_USER}
+      DEBEZIUM_DB_PASSWORD: ${DEBEZIUM_DB_PASSWORD}
+    volumes:
+      - ./docker/postgres/debezium-user.sql:/sql/debezium-user.sql:ro
+    depends_on:
+      product:
+        condition: service_healthy
+    networks:
+      - shopapp-network
+
+  # registers the connectors in kafka/connects (PUT .../config, idempotent), then restarts FAILED ones every 30 s
+  kafka-connect-init:
+    image: curlimages/curl:8.17.0
+    entrypoint: ["/bin/sh", "/kafka/register-connectors.sh"]
+    # the first registration gives up after ~1 min (worker not ready); start over until it works
+    restart: on-failure
+    volumes:
+      - ./kafka:/kafka:ro
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/registered"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    depends_on:
+      kafka-connect:
+        condition: service_healthy
+      debezium-db-init:
+        condition: service_completed_successfully
     networks:
       - shopapp-network
 

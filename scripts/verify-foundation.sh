@@ -20,7 +20,7 @@ BASE_URL_SUFFIX=""
 [ "$PORT" != "80" ] && BASE_URL_SUFFIX=":$PORT"
 EXPECTED_ISSUER="${KEYCLOAK_URL}/realms/shopapp"
 EXPECTED_DATABASES=(keycloak product cart order customer media rating location inventory promotion tax payment webhook recommendation)
-SERVICES=(postgres pgadmin identity kafka kafka-ui redis product cart customer order media storefront-bff storefront backoffice-bff backoffice nginx)
+SERVICES=(postgres pgadmin identity kafka kafka-ui kafka-connect redis product cart customer order media storefront-bff storefront backoffice-bff backoffice nginx)
 failures=0
 
 # shellcheck source=lib/storefront-login.sh
@@ -435,6 +435,63 @@ check_media() {
     esac
 }
 
+# Slice 4a CDC: the Debezium connector runs and a product change reaches dbproduct.public.product within 30 s.
+# The change is a rename through the product API (admin token), restored afterwards.
+check_cdc() {
+    local status token product_id detail related original marker found
+    status=$(docker compose exec -T kafka-connect curl -s localhost:8083/connectors/product-connector/status 2>/dev/null \
+        | python -c "import json,sys;s=json.load(sys.stdin);print(s['connector']['state']+'/'+','.join(t['state'] for t in s['tasks']))" \
+        2>/dev/null || true)
+    if [ "$status" = "RUNNING/RUNNING" ]; then
+        pass "Debezium product-connector and its task are RUNNING"
+    else
+        fail "Debezium product-connector is '${status:-unreachable}' (docker compose logs kafka-connect kafka-connect-init)"
+        return
+    fi
+    token=$(curl -s -d grant_type=password -d client_id=swagger-ui -d username=admin -d password=admin \
+        "$(url identity /realms/shopapp/protocol/openid-connect/token)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['access_token'])" 2>/dev/null || true)
+    product_id=$(curl -s "$(url api /product/storefront/product/galaxy-a55)" \
+        | python -c "import json,sys;print(json.load(sys.stdin)['id'])" 2>/dev/null || true)
+    detail=$(curl -s -H "Authorization: Bearer $token" "$(url api "/product/backoffice/products/$product_id")" || true)
+    related=$(curl -s -H "Authorization: Bearer $token" \
+        "$(url api "/product/backoffice/products/related-products/$product_id")" || true)
+    original=$(python -c "import json,sys;d=json.load(sys.stdin);print(d['name'])" <<< "$detail" 2>/dev/null || true)
+    if [ -z "$product_id" ] || [ -z "$original" ]; then
+        fail "read the Galaxy A55 admin detail (CDC)"
+        return
+    fi
+    marker="$original CDC smoke $$"
+    put_name() {
+        local thumb body
+        thumb=$(python -c "import json,sys;t=json.load(sys.stdin).get('thumbnailMedia');print(t['id'] if t else '')" <<< "$detail")
+        body=$(product_put_body "$detail" "$related" "$thumb" | python -c "import json,sys;b=json.load(sys.stdin);b['name']=sys.argv[1];print(json.dumps(b))" "$1")
+        curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $token" \
+            -H 'Content-Type: application/json' -d "$body" "$(url api "/product/backoffice/products/$product_id")" || true
+    }
+    status=$(put_name "$marker")
+    if [ "$status" != "204" ]; then
+        fail "admin renames Galaxy A55 for the CDC check -> $status"
+        return
+    fi
+    # re-read the topic (small) until the marker, unique to this run, shows up; give up after 30 s
+    local deadline=$((SECONDS + 30))
+    found=""
+    while [ -z "$found" ] && [ "$SECONDS" -lt "$deadline" ]; do
+        found=$(docker compose exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh \
+            --bootstrap-server localhost:9092 --topic dbproduct.public.product --from-beginning --timeout-ms 5000 \
+            2>/dev/null | grep -m 1 -F "\"name\":\"$marker\"" || true)
+    done
+    if python -c "import json,sys;v=json.loads(sys.argv[1]);assert v['after']['id']==int(sys.argv[2]) and v['op']=='u'" \
+        "$found" "$product_id" 2>/dev/null; then
+        pass "a product rename lands on topic dbproduct.public.product (CDC)"
+    else
+        fail "no CDC message for product $product_id on dbproduct.public.product within 30 s"
+    fi
+    status=$(put_name "$original")
+    if [ "$status" = "204" ]; then pass "restore the Galaxy A55 name"; else fail "restore the Galaxy A55 name '$original' -> $status (fix by hand)"; fi
+}
+
 run_checks() {
     check_services_healthy
     check_ports_loopback_only
@@ -449,6 +506,7 @@ run_checks() {
     check_login_and_cart
     check_backoffice
     check_media
+    check_cdc
 }
 
 echo "Using nginx port ${PORT}, domain ${DOMAIN}"

@@ -68,6 +68,7 @@ Notes:
   pages still load and show placeholder images.
 - **Keycloak volume created before slice 2b?** Run `bash identity/scripts/apply-kc-admin-api-scope.sh` once
   (adds the admin-API audience scope the customer service needs; fresh volumes get it from the realm file).
+- **CDC (change data capture)**: see [CDC](#cdc-change-data-capture) below.
 - `postgres_init.sql` creates the per-service databases **only when the Postgres volume is empty**.
   After changing it, run `docker compose down -v` to start fresh.
 - **Port 80 already in use?** In `.env` set `NGINX_HTTP_PORT=8000` **and**
@@ -79,6 +80,49 @@ Notes:
   only read on first start; after editing them, run `docker compose down -v`.
 - To change the domain, edit `DOMAIN` in `.env` (and your hosts file) — nginx and the Keycloak realm
   read it from there.
+
+## CDC (change data capture)
+
+Product changes flow from Postgres to Kafka without any service code (slice 4, `decisions.md` 4-1..4-9):
+
+```
+product service --writes--> Postgres product.public.product --WAL (pgoutput, slot product_slot,
+publication dbz_product)--> kafka-connect (Debezium) --> Kafka topic dbproduct.public.product --> search (slice 4)
+```
+
+- **Services**: `kafka-connect` (Debezium Connect `quay.io/debezium/connect:3.7.1.Final`, stores its config,
+  offsets and status in the Kafka topics `connect-configs`, `connect-offsets`, `connect-statuses`);
+  `debezium-db-init` (one-shot: replication user, grants and publication, after product's tables exist);
+  `kafka-connect-init` (registers `kafka/connects/debezium-product.json` as `product-connector` with
+  `PUT /connectors/product-connector/config` on every `up`, then restarts a FAILED connector every 30 s).
+- **Messages**: key `{"id":<product id>}`, value the Debezium envelope without schema:
+  `{"before":…,"after":{…product columns…},"op":"c|u|d|r","source":…}`. `r` = initial snapshot (all products, once,
+  when the connector first starts), a delete is followed by a tombstone (null value). Every product row update
+  sends a message, including stock changes (`stock_quantity` is a product column).
+- **Check it**: Kafka UI (http://kafka.shopapp.local) → *Kafka Connect* → `product-connector` (state, tasks,
+  restart) and *Topics* → `dbproduct.public.product` → *Messages*. From the shell:
+  `docker compose exec kafka-connect curl -s localhost:8083/connectors?expand=status`. The smoke script renames a
+  product and waits for its message on the topic.
+- **Postgres user**: Debezium logs in as `DEBEZIUM_DB_USER` (`.env`, default `debezium`) with `REPLICATION` and
+  `SELECT` on `public.product` only, not the superuser. After changing `DEBEZIUM_DB_PASSWORD`, run
+  `bash scripts/apply-debezium-user.sh` and `docker compose restart kafka-connect`.
+- **Disk safety**: a replication slot keeps WAL until Debezium confirms it. If `kafka-connect` is stopped for a long
+  time while the other databases keep writing, WAL piles up; `max_slot_wal_keep_size = 1GB`
+  (`docker/postgres/postgresql.conf`) caps it — past that Postgres invalidates `product_slot` and the connector
+  fails (a FAILED task that `kafka-connect-init` cannot fix by restarting). To recover with a fresh snapshot, inside
+  `kafka-connect` (`docker compose exec kafka-connect bash`):
+  `curl -X PUT localhost:8083/connectors/product-connector/stop`, then
+  `docker compose exec postgres psql -U admin -c "SELECT pg_drop_replication_slot('product_slot')"` (from the host),
+  then `curl -X DELETE localhost:8083/connectors/product-connector/offsets` and
+  `curl -X PUT localhost:8083/connectors/product-connector/resume`. Debezium creates the slot again and snapshots
+  all products (consumers must accept duplicates, which search does by upserting by id). Check WAL held by the
+  slot with
+  `SELECT slot_name, wal_status, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) FROM pg_replication_slots`.
+- **Resources**: `kafka-connect` uses about 0.7–1 GB RAM (heap capped at 512 MB) and some CPU at start-up (it
+  takes 30–90 s to become healthy). If it is down, the shop keeps working; only the CDC topic (and later search
+  updates) stops, and it catches up from its saved position when it comes back.
+- **Volume created before slice 4?** Nothing to do: `debezium-db-init` creates the user on the next `up`
+  (`postgres_init.sql` only runs on an empty volume).
 
 ## URLs and credentials
 
@@ -114,7 +158,8 @@ Keycloak clients: `storefront-bff`, `backoffice-bff`, `customer-management` (con
 - Checkstyle fails the build on any warning.
 - Kafka runs in KRaft mode (no ZooKeeper).
 - Images: postgres 16.16, pgAdmin 9.19.0, Keycloak 26.8.2, apache/kafka 4.4.0, kafbat/kafka-ui v1.5.0,
-  nginx 1.30.6, eclipse-temurin 27-jre (Java services), node 24-alpine (storefront).
+  nginx 1.30.6, eclipse-temurin 27-jre (Java services), node 24-alpine (storefront),
+  quay.io/debezium/connect 3.7.1.Final (Kafka Connect 4.3.1 clients against the 4.4 broker), curlimages/curl 8.17.0.
 - Storefront: Next.js 16.4.6, React 19.3.1, react-bootstrap 2.10.10, TypeScript 6.0.3, ESLint 9.39.5, Vitest 5.1.0.
 - Redis 7.4.12 for BFF sessions. nginx resolves containers through Docker DNS on each request, so rebuilt
   containers keep working without restarting nginx.
