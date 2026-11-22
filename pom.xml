@@ -6,7 +6,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.2</version>
+        <version>4.2.0</version>
         <relativePath/>
     </parent>
 
@@ -56,7 +56,7 @@
         <keycloak-admin-client.version>26.0.13</keycloak-admin-client.version>
         <logstash-logback-encoder.version>9.0</logstash-logback-encoder.version>
         <!-- built against the OpenTelemetry SDK that Spring Boot manages (1.62.0) (decisions.md 6-2) -->
-        <opentelemetry-logback-appender.version>2.28.1-alpha</opentelemetry-logback-appender.version>
+        <opentelemetry-logback-appender.version>2.34.0-alpha</opentelemetry-logback-appender.version>
 
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version>
         <checkstyle.version>14.4.0</checkstyle.version>

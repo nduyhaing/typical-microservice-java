@@ -17,7 +17,7 @@
 
     <properties>
         <!-- Spring AI 2.0.x is built against Spring Boot 4.1 (decisions.md 5-40) -->
-        <spring-ai.version>2.0.2</spring-ai.version>
+        <spring-ai.version>2.1.0</spring-ai.version>
     </properties>
 
     <dependencyManagement>
