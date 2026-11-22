@@ -251,7 +251,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: register
-          image: curlimages/curl:8.17.0
+          image: curlimages/curl:8.23.0
           # the script reads connects/*.json next to itself: assemble that layout in an emptyDir, so every file of
           # kafka/connects (one ConfigMap key each) is registered without listing them here
           command: ["/bin/sh", "-ec"]
