@@ -113,7 +113,7 @@ services:
       - shopapp-network
 
   kafka-ui:
-    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    image: ghcr.io/kafbat/kafka-ui:v1.5.1
     environment:
       KAFKA_CLUSTERS_0_NAME: shopapp
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -190,7 +190,7 @@ services:
 
   # registers the connectors in kafka/connects (PUT .../config, idempotent), then restarts FAILED ones every 30 s
   kafka-connect-init:
-    image: curlimages/curl:8.17.0
+    image: curlimages/curl:8.23.0
     entrypoint: ["/bin/sh", "/kafka/register-connectors.sh"]
     # the first registration gives up after ~1 min (worker not ready); start over until it works
     restart: on-failure
@@ -210,7 +210,7 @@ services:
       - shopapp-network
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.8
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.6
     # creates the search user (file realm) from .env, then starts Elasticsearch (decisions.md 4-17)
     entrypoint: ["/bin/tini", "--", "/bin/bash", "/shopapp/entrypoint.sh"]
     environment:
@@ -617,7 +617,7 @@ services:
   # test receiver for webhooks (smoke, live checks): logs each request (headers + exact body) as one JSON line on
   # stdout, answers 200; reuses the nginx image (~5 MB RAM), no host port (decisions.md 5-37)
   webhook-receiver:
-    image: nginx:1.30.6
+    image: nginx:1.31.9
     volumes:
       - ./docker/webhook-receiver/default.conf:/etc/nginx/conf.d/default.conf:ro
     healthcheck:
@@ -766,7 +766,7 @@ services:
       - shopapp-network
 
   nginx:
-    image: nginx:1.30.6
+    image: nginx:1.31.9
     environment:
       DOMAIN: ${DOMAIN}
       NGINX_HTTP_PORT: ${NGINX_HTTP_PORT}
